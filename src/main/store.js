@@ -2,6 +2,7 @@ const path = require('node:path');
 const fs = require('node:fs/promises');
 
 const DATA_VERSION = 2;
+const AUTO_BACKUP_KEEP = 14;
 
 function nowIso() {
   return new Date().toISOString();
@@ -210,41 +211,131 @@ function ensureArrays(data) {
 async function createStore(userDataDir) {
   const dataDir = path.join(userDataDir, 'data');
   const dataPath = path.join(dataDir, 'iterself-data.json');
+  const tmpPath = `${dataPath}.tmp`;
+  const bakPath = `${dataPath}.bak`;
+  const autoBackupDir = path.join(userDataDir, 'backups', 'auto');
   await fs.mkdir(dataDir, { recursive: true });
 
-  async function read() {
+  // Every store operation runs through one queue so a read-modify-write can
+  // never interleave with another and silently drop the earlier change.
+  let opQueue = Promise.resolve();
+  function serialized(operation) {
+    const run = opQueue.then(operation, operation);
+    opQueue = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
+  async function readJsonFile(filePath) {
+    let text;
     try {
-      const text = await fs.readFile(dataPath, 'utf8');
-      const parsed = JSON.parse(text);
-      const previousVersion = parsed.version;
-      const data = ensureArrays(parsed);
+      text = await fs.readFile(filePath, 'utf8');
+    } catch (error) {
+      if (error.code === 'ENOENT') return { missing: true };
+      // Transient errors (locks, permissions) must not trigger recovery:
+      // recovering over a merely-locked file would replace newer data.
+      throw error;
+    }
+    try {
+      return { ok: true, data: JSON.parse(text) };
+    } catch (error) {
+      return { corrupt: true };
+    }
+  }
+
+  async function renameWithRetry(from, to) {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await fs.rename(from, to);
+      } catch (error) {
+        // Antivirus/indexers on Windows can hold the target briefly.
+        if (attempt >= 2 || !['EPERM', 'EACCES', 'EBUSY'].includes(error.code)) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+      }
+    }
+  }
+
+  async function refreshBak() {
+    try {
+      await fs.copyFile(dataPath, bakPath);
+    } catch (error) {
+      // The .bak refresh is best-effort: saving the user's current change
+      // matters more than keeping the previous version.
+      if (error.code !== 'ENOENT') console.warn(`iterself: could not refresh ${bakPath}: ${error.message}`);
+    }
+  }
+
+  async function refreshAutoBackup(json) {
+    try {
+      const filePath = path.join(autoBackupDir, `iterself-auto-${todayIso()}.json`);
+      try {
+        await fs.access(filePath);
+        return;
+      } catch (error) {
+        // No snapshot for today yet; create one below.
+      }
+      await fs.mkdir(autoBackupDir, { recursive: true });
+      await fs.writeFile(filePath, json, 'utf8');
+      const files = (await fs.readdir(autoBackupDir))
+        .filter((name) => /^iterself-auto-\d{4}-\d{2}-\d{2}\.json$/.test(name))
+        .sort();
+      const excess = files.slice(0, Math.max(0, files.length - AUTO_BACKUP_KEEP));
+      await Promise.all(excess.map((name) => fs.rm(path.join(autoBackupDir, name), { force: true })));
+    } catch (error) {
+      console.warn(`iterself: auto backup failed: ${error.message}`);
+    }
+  }
+
+  async function read() {
+    const main = await readJsonFile(dataPath);
+    if (main.ok) {
+      const previousVersion = main.data.version;
+      const data = ensureArrays(main.data);
       if (previousVersion !== DATA_VERSION) return write(data);
       return data;
-    } catch (error) {
-      if (error.code !== 'ENOENT') throw error;
-      const data = createInitialData();
-      await write(data);
-      return data;
     }
+
+    if (main.corrupt) {
+      // Never discard user bytes: move the unreadable file aside, then recover.
+      const stamp = nowIso().replace(/[:.]/g, '-');
+      const quarantinePath = path.join(dataDir, `iterself-data.corrupt-${stamp}.json`);
+      await fs.rename(dataPath, quarantinePath);
+      console.error(`iterself: data file was unreadable; preserved at ${quarantinePath}`);
+    }
+
+    const bak = await readJsonFile(bakPath);
+    if (bak.ok) {
+      console.warn(`iterself: restoring data from ${bakPath}`);
+      return write(bak.data);
+    }
+
+    return write(createInitialData());
   }
 
   async function write(data) {
     const next = ensureArrays(data);
     next.meta = next.meta || {};
     next.meta.updatedAt = nowIso();
-    await fs.writeFile(dataPath, JSON.stringify(next, null, 2), 'utf8');
+    const json = JSON.stringify(next, null, 2);
+    await fs.writeFile(tmpPath, json, 'utf8');
+    await refreshBak();
+    await renameWithRetry(tmpPath, dataPath);
+    await refreshAutoBackup(json);
     return next;
   }
 
   async function getData() {
-    return read();
+    return serialized(read);
   }
 
   async function replace(nextData) {
-    return write(nextData);
+    return serialized(() => write(nextData));
   }
 
   async function mutate(mutation) {
+    return serialized(() => applyMutation(mutation));
+  }
+
+  async function applyMutation(mutation) {
     const data = await read();
     const { type, collection, item, id: itemId, patch, key } = mutation || {};
 

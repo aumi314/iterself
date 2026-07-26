@@ -180,10 +180,88 @@ function testPureHelpers() {
   assert.equal(startOfWeekIso('2026-07-05'), '2026-06-29', 'Sunday maps back to previous Monday');
 }
 
+async function testDataSafety() {
+  await withTempDir(async (dir) => {
+    const dataPath = path.join(dir, 'data', 'iterself-data.json');
+    const bakPath = `${dataPath}.bak`;
+
+    // Seed plus two mutations so .bak holds a meaningful previous version.
+    let store = await createStore(dir);
+    await store.getData();
+    await store.mutate({ type: 'upsert', collection: 'visionDocuments', item: { title: 'Safety A', content: 'a' } });
+    await store.mutate({ type: 'upsert', collection: 'visionDocuments', item: { title: 'Safety B', content: 'b' } });
+
+    const bak = JSON.parse(await fs.readFile(bakPath, 'utf8'));
+    assert.ok(bak.visionDocuments.some((doc) => doc.title === 'Safety A'), 'bak keeps the previous version');
+    assert.ok(!bak.visionDocuments.some((doc) => doc.title === 'Safety B'), 'bak stays one write behind');
+    const dataFiles = await fs.readdir(path.join(dir, 'data'));
+    assert.ok(!dataFiles.some((name) => name.endsWith('.tmp')), 'no tmp residue after writes');
+
+    // Corrupt the main file: a new store must quarantine it and restore from bak.
+    await fs.writeFile(dataPath, 'not json {{{', 'utf8');
+    store = await createStore(dir);
+    const recovered = await store.getData();
+    assert.ok(recovered.visionDocuments.some((doc) => doc.title === 'Safety A'), 'recovery restores bak content');
+    assert.ok(!recovered.visionDocuments.some((doc) => doc.title === 'Safety B'), 'recovery is one write behind by design');
+    const afterRecovery = await fs.readdir(path.join(dir, 'data'));
+    const quarantine = afterRecovery.find((name) => name.includes('corrupt'));
+    assert.ok(quarantine, 'corrupt file is preserved');
+    assert.equal(await fs.readFile(path.join(dir, 'data', quarantine), 'utf8'), 'not json {{{', 'quarantined bytes untouched');
+
+    // Missing main file with a valid bak restores instead of reseeding.
+    await fs.rm(dataPath, { force: true });
+    store = await createStore(dir);
+    const restored = await store.getData();
+    assert.ok(restored.visionDocuments.some((doc) => doc.title === 'Safety A'), 'missing file restores from bak');
+
+    // Corrupt main and no bak: quarantine and reseed without throwing.
+    await fs.writeFile(dataPath, '###', 'utf8');
+    await fs.rm(bakPath, { force: true });
+    store = await createStore(dir);
+    const reseeded = await store.getData();
+    assert.ok(reseeded.eventCategories.length > 0, 'reseeds when nothing is recoverable');
+
+    // Concurrent mutations must all land (serialized read-modify-write).
+    store = await createStore(dir);
+    await Promise.all(Array.from({ length: 10 }, (_, index) => store.mutate({
+      type: 'upsert',
+      collection: 'insights',
+      item: { timestamp: `2026-07-07T0${index % 10}:00:00.000Z`, date: '2026-07-07', content: `concurrent-${index}` },
+    })));
+    const finalStore = await createStore(dir);
+    const final = await finalStore.getData();
+    for (let index = 0; index < 10; index += 1) {
+      assert.ok(final.insights.some((entry) => entry.content === `concurrent-${index}`), `concurrent mutation ${index} persisted`);
+    }
+  });
+}
+
+async function testAutoBackupRotation() {
+  await withTempDir(async (dir) => {
+    const autoDir = path.join(dir, 'backups', 'auto');
+    await fs.mkdir(autoDir, { recursive: true });
+    for (let index = 1; index <= 20; index += 1) {
+      const day = String(index).padStart(2, '0');
+      await fs.writeFile(path.join(autoDir, `iterself-auto-2020-01-${day}.json`), '{}', 'utf8');
+    }
+
+    const store = await createStore(dir);
+    await store.getData(); // seed write creates today's snapshot and prunes
+
+    const files = (await fs.readdir(autoDir)).filter((name) => name.startsWith('iterself-auto-')).sort();
+    assert.equal(files.length, 14, 'auto backups pruned to keep limit');
+    assert.ok(!files.includes('iterself-auto-2020-01-01.json'), 'oldest snapshots removed');
+    const todaySnapshot = JSON.parse(await fs.readFile(path.join(autoDir, files[files.length - 1]), 'utf8'));
+    assert.ok(Array.isArray(todaySnapshot.tasks), 'snapshot is valid data JSON');
+  });
+}
+
 async function main() {
   testPureHelpers();
   await testStoreLifecycle();
   await testLegacyOkrMigration();
+  await testDataSafety();
+  await testAutoBackupRotation();
   await testExportBundle();
   console.log('All data-layer tests passed.');
 }
