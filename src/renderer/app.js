@@ -159,11 +159,14 @@ let state = {
   markdownSidebarCollapsed: true,
   sidebarPanel: localStorage.getItem('sidebarPanel') === 'timeline' ? 'timeline' : 'md',
   timelineView: null,
+  timelineSelection: null,
   modal: null,
 };
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
+
+let timelineDragActive = false;
 
 function uid(prefix = 'id') {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -272,6 +275,12 @@ function timeToMinutes(time) {
   const [hours, minutes] = time.split(':').map(Number);
   if ([hours, minutes].some(Number.isNaN)) return null;
   return hours * 60 + minutes;
+}
+
+function minutesToTimeValue(minutes) {
+  const clamped = Math.max(0, Math.min(24 * 60, Math.round(minutes)));
+  if (clamped >= 24 * 60) return '23:59';
+  return `${String(Math.floor(clamped / 60)).padStart(2, '0')}:${String(clamped % 60).padStart(2, '0')}`;
 }
 
 function normalizeTimeValue(value) {
@@ -1047,6 +1056,20 @@ function renderSidebarTimeline() {
     if (start === null || duration <= 0) return '';
     return `<div class="scrubber-mark ${cls}" style="top:${(start / (24 * 60)) * 100}%;height:${Math.max(0.6, (duration / (24 * 60)) * 100)}%;"></div>`;
   };
+  const selection = state.timelineSelection && state.timelineSelection.date === date ? state.timelineSelection : null;
+  const selectionOverlay = (lane) => {
+    if (!selection || selection.lane !== lane) return '';
+    const top = timelinePercent(selection.start, range);
+    const height = ((selection.end - selection.start) / (range.end - range.start)) * 100;
+    return `
+      <div class="timeline-selection" style="top:${top}%;height:${height}%;">
+        <div class="selection-handle top" data-selection-handle="start"></div>
+        <span class="selection-range">${minutesToTimeValue(selection.start)} – ${minutesToTimeValue(selection.end)}</span>
+        <button class="selection-add" data-action="create-from-selection" aria-label="${en ? 'Create from selection' : '从选区新建'}">+</button>
+        <div class="selection-handle bottom" data-selection-handle="end"></div>
+      </div>
+    `;
+  };
   return `
     ${heading}
     <div class="sidebar-timeline">
@@ -1057,12 +1080,15 @@ function renderSidebarTimeline() {
         <div class="timeline-track planned-track">
           ${hourMarks.map((minute) => `<div class="timeline-hour-line" style="top:${timelinePercent(minute, range)}%;"></div>`).join('')}
           ${schedules.map((block) => timelineBlock(block, 'scheduleBlocks', 'Schedule block', range)).join('')}
+          ${selectionOverlay('planned')}
         </div>
         <div class="timeline-track actual-track">
           ${hourMarks.map((minute) => `<div class="timeline-hour-line" style="top:${timelinePercent(minute, range)}%;"></div>`).join('')}
           ${entries.map((entry) => timelineBlock(entry, 'timeEntries', 'Time record', range)).join('')}
+          ${selectionOverlay('actual')}
         </div>
         ${nowLine}
+        <div class="timeline-guide" data-timeline-guide hidden><span></span></div>
       </div>
       <div class="timeline-scrubber" data-timeline-scrubber title="${en ? 'Drag to move the window · double-click to reset' : '拖动移动窗口 · 双击复位全天'}">
         ${schedules.map((block) => scrubberMark(block, 'planned')).join('')}
@@ -1594,11 +1620,12 @@ function timelineBlock(item, collectionName, fallbackTitle, range) {
 
 function scheduleForm(date, block = null) {
   const mode = block ? 'edit' : 'create';
+  const selection = !block && state.timelineSelection?.lane === 'planned' ? state.timelineSelection : null;
   return `
     <form data-form="schedule" data-mode="${mode}" data-id="${escapeHtml(block?.id || '')}" class="form-grid four">
       <input type="hidden" name="date" value="${escapeHtml(block?.date || date)}" />
-      <label>Start${timeInput('start', block?.start || '09:00')}</label>
-      <label>End${timeInput('end', block?.end || '10:00')}</label>
+      <label>Start${timeInput('start', block?.start || (selection ? minutesToTimeValue(selection.start) : '09:00'))}</label>
+      <label>End${timeInput('end', block?.end || (selection ? minutesToTimeValue(selection.end) : '10:00'))}</label>
       <label class="span2">Bound task<select name="taskId">${optionList(taskOptions(), block?.taskId || '')}</select></label>
       <label class="span4">Note<input name="note" value="${escapeHtml(block?.note || '')}" placeholder="Optional note" /></label>
       <div class="span4"><button type="submit">${block ? '保存日计划' : 'Add block'}</button></div>
@@ -1608,7 +1635,8 @@ function scheduleForm(date, block = null) {
 
 function timeEntryForm(date, entry = null) {
   const mode = entry ? 'edit' : 'create';
-  const timerStart = entry?.start || state.timer?.start || nowTime();
+  const selection = !entry && state.timelineSelection?.lane === 'actual' ? state.timelineSelection : null;
+  const timerStart = entry?.start || (selection ? minutesToTimeValue(selection.start) : null) || state.timer?.start || nowTime();
   return `
     ${entry ? '' : `<div class="toolbar">
       ${state.timer
@@ -1618,7 +1646,7 @@ function timeEntryForm(date, entry = null) {
     <form data-form="time-entry" data-mode="${mode}" data-id="${escapeHtml(entry?.id || '')}" class="form-grid four">
       <input type="hidden" name="date" value="${escapeHtml(entry?.date || date)}" />
       <label>Start${timeInput('start', timerStart)}</label>
-      <label>End${timeInput('end', entry?.end || nowTime())}</label>
+      <label>End${timeInput('end', entry?.end || (selection ? minutesToTimeValue(selection.end) : null) || nowTime())}</label>
       <label>Name<input name="title" value="${escapeHtml(entry?.title || '')}" placeholder="Optional free title" /></label>
       <label>Bound task<select name="taskId">${optionList(taskOptions(), entry?.taskId || '')}</select></label>
       <label class="span4">Note<input name="note" value="${escapeHtml(entry?.note || '')}" placeholder="What objectively happened?" /></label>
@@ -2217,6 +2245,95 @@ function bindTimelineViewEvents() {
     document.addEventListener('pointermove', onMove);
     document.addEventListener('pointerup', onUp);
   });
+
+  const guide = container.querySelector('[data-timeline-guide]');
+  const snapMinutes = (minutes) => Math.max(0, Math.min(24 * 60, Math.round(minutes / 5) * 5));
+  // Geometry is cached at drag start: re-renders replace the viewport
+  // element mid-drag, so live lookups would go stale.
+  const minuteAtFactory = () => {
+    const rect = viewport.getBoundingClientRect();
+    const view = timelineViewRange();
+    return (clientY) => view.start
+      + Math.min(1, Math.max(0, (clientY - rect.top) / rect.height)) * (view.end - view.start);
+  };
+
+  viewport.addEventListener('mousemove', (event) => {
+    if (!guide || timelineDragActive) return;
+    const view = timelineViewRange();
+    const minute = snapMinutes(minuteAtFactory()(event.clientY));
+    guide.hidden = false;
+    guide.style.top = `${timelinePercent(minute, view)}%`;
+    guide.querySelector('span').textContent = minutesToTimeValue(minute);
+  });
+  viewport.addEventListener('mouseleave', () => {
+    if (guide) guide.hidden = true;
+  });
+
+  container.querySelectorAll('.timeline-track').forEach((track) => {
+    const lane = track.classList.contains('planned-track') ? 'planned' : 'actual';
+    track.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return;
+      if (event.target.closest('.timeline-block') || event.target.closest('.timeline-selection')) return;
+      event.preventDefault();
+      const minuteAt = minuteAtFactory();
+      const anchor = snapMinutes(minuteAt(event.clientY));
+      let moved = false;
+      timelineDragActive = true;
+      if (guide) guide.hidden = true;
+      const onMove = (moveEvent) => {
+        const current = snapMinutes(minuteAt(moveEvent.clientY));
+        if (!moved && Math.abs(current - anchor) < 5) return;
+        moved = true;
+        const start = Math.min(anchor, current);
+        state.timelineSelection = {
+          date: activeDate(),
+          lane,
+          start,
+          end: Math.max(start + 5, Math.max(anchor, current)),
+        };
+        render();
+      };
+      const onUp = () => {
+        timelineDragActive = false;
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', onUp);
+        if (!moved && state.timelineSelection) {
+          state.timelineSelection = null;
+          render();
+        }
+      };
+      document.addEventListener('pointermove', onMove);
+      document.addEventListener('pointerup', onUp);
+    });
+  });
+
+  container.querySelectorAll('[data-selection-handle]').forEach((handle) => {
+    handle.addEventListener('pointerdown', (event) => {
+      if (!state.timelineSelection) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const edge = handle.dataset.selectionHandle;
+      const baseSelection = { ...state.timelineSelection };
+      const minuteAt = minuteAtFactory();
+      timelineDragActive = true;
+      const onMove = (moveEvent) => {
+        const minute = snapMinutes(minuteAt(moveEvent.clientY));
+        if (edge === 'start') {
+          state.timelineSelection = { ...baseSelection, start: Math.min(minute, baseSelection.end - 5) };
+        } else {
+          state.timelineSelection = { ...baseSelection, end: Math.max(minute, baseSelection.start + 5) };
+        }
+        render();
+      };
+      const onUp = () => {
+        timelineDragActive = false;
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', onUp);
+      };
+      document.addEventListener('pointermove', onMove);
+      document.addEventListener('pointerup', onUp);
+    });
+  });
 }
 
 function bindTimeInputEvents() {
@@ -2504,6 +2621,7 @@ async function handleFormSubmit(event) {
       await mutate({ type: 'upsert', collection: 'scheduleBlocks', item: { id: uid('sb'), ...patch } }, 'Saved');
     }
     state.selectedScheduleBlockId = null;
+    state.timelineSelection = null;
     state.modal = null;
     render();
     return;
@@ -2527,6 +2645,7 @@ async function handleFormSubmit(event) {
     }
     state.selectedTimeEntryId = null;
     state.timer = null;
+    state.timelineSelection = null;
     state.modal = null;
     render();
     return;
@@ -2562,6 +2681,16 @@ async function handleAction(event) {
 }
 
 async function runAction(action, el) {
+  if (action === 'create-from-selection') {
+    const selection = state.timelineSelection;
+    if (!selection) return;
+    state.modal = selection.lane === 'actual' ? 'time-entry' : 'schedule';
+    state.selectedScheduleBlockId = null;
+    state.selectedTimeEntryId = null;
+    render();
+    return;
+  }
+
   if (action === 'set-sidebar-panel') {
     state.sidebarPanel = el.dataset.panel === 'timeline' ? 'timeline' : 'md';
     localStorage.setItem('sidebarPanel', state.sidebarPanel);
