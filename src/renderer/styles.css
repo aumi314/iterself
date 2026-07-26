@@ -662,9 +662,11 @@ label {
 
 .selection-add {
   position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
+  /* Centred without transform: the global button:active translateY(1px)
+     would override a translate(-50%,-50%) and fling the button out from
+     under the cursor mid-click. */
+  top: calc(50% - 12px);
+  left: calc(50% - 12px);
   width: 24px;
   height: 24px;
   padding: 0;
