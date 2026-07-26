@@ -1133,12 +1133,12 @@ function scheduleTimeline() {
   return `
     <section class="card schedule-timeline">
       <div class="timeline-bar">
-        <div class="timeline-nav">
-          <button class="small ghost" data-action="schedule-prev" aria-label="${en ? 'Previous' : '上一个'}">←</button>
-          <button class="small ghost" data-action="schedule-today">${en ? 'Today' : '今天'}</button>
-          <button class="small ghost" data-action="schedule-next" aria-label="${en ? 'Next' : '下一个'}">→</button>
+        <button class="small ghost" data-action="schedule-today">${state.scheduleScope === 'day' ? (en ? 'Today' : '今天') : (en ? 'This week' : '本周')}</button>
+        <div class="timeline-center">
+          <button class="small ghost" data-action="schedule-prev" aria-label="${en ? 'Previous week' : '上一周'}">←</button>
+          <div class="timeline-title">${escapeHtml(weekTitle(weekStart))}</div>
+          <button class="small ghost" data-action="schedule-next" aria-label="${en ? 'Next week' : '下一周'}">→</button>
         </div>
-        <div class="timeline-title">${escapeHtml(weekTitle(weekStart))}</div>
         <div class="timeline-scope">
           <button class="scope-chip ${state.scheduleScope === 'week' ? 'active' : ''}" data-action="schedule-set-scope" data-scope="week">${en ? 'Week' : '周'}</button>
           <button class="scope-chip ${state.scheduleScope === 'day' ? 'active' : ''}" data-action="schedule-set-scope" data-scope="day">${en ? 'Day' : '日'}</button>
@@ -2569,12 +2569,10 @@ async function runAction(action, el) {
     return;
   }
 
-  // Arrows step by the visible unit — a week in week view, a day in day
-  // view — and never change which view is active.
+  // Arrows always move by week (keeping the same weekday selected); a
+  // specific day is only ever chosen by clicking its chip.
   if (action === 'schedule-prev' || action === 'schedule-next') {
-    const direction = action === 'schedule-prev' ? -1 : 1;
-    const step = state.scheduleScope === 'day' ? 1 : 7;
-    const nextDate = addDays(activeDate(), direction * step);
+    const nextDate = addDays(activeDate(), action === 'schedule-prev' ? -7 : 7);
     state.modal = null;
     state.data = await window.iterself.mutate({ type: 'setMeta', patch: { activeDate: nextDate, activeWeekStart: startOfWeekIso(nextDate) } });
     render();

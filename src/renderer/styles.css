@@ -911,9 +911,12 @@ label {
   align-items: center;
 }
 
-.timeline-nav {
+.timeline-center {
   display: flex;
-  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-width: 0;
 }
 
 .timeline-title {
