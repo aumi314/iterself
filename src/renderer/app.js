@@ -2142,9 +2142,10 @@ function bindTimelineViewEvents() {
   const viewport = container.querySelector('[data-timeline-viewport]');
   const scrubber = container.querySelector('[data-timeline-scrubber]');
 
-  // Verified against ManicTime's DayTimelinesView.Timelines_PreviewMouseWheel:
-  // plain wheel zooms (anchored at the cursor; centre over the range
-  // selector), Ctrl+wheel moves the window.
+  // ManicTime's principle adapted to a vertical timeline: the unmodified
+  // wheel follows the content's natural axis (vertical pan, like scrolling
+  // a page), Ctrl+wheel is the transform (zoom anchored at the cursor;
+  // centre over the scrubber) — matching the universal Ctrl+zoom convention.
   container.addEventListener('wheel', (event) => {
     event.preventDefault();
     // Chromium reports Shift+vertical-wheel as deltaX.
@@ -2153,9 +2154,6 @@ function bindTimelineViewEvents() {
     const view = timelineViewRange();
     const size = view.end - view.start;
     if (event.ctrlKey) {
-      const step = Math.max(15, Math.round(size * 0.1)) * (delta > 0 ? 1 : -1);
-      setTimelineView(view.start + step, view.end + step);
-    } else {
       const overScrubber = Boolean(event.target.closest('[data-timeline-scrubber]'));
       const rect = viewport.getBoundingClientRect();
       const anchorRatio = overScrubber
@@ -2165,6 +2163,9 @@ function bindTimelineViewEvents() {
       const nextSize = size * (delta > 0 ? 1.25 : 0.8);
       const start = anchor - anchorRatio * nextSize;
       setTimelineView(start, start + nextSize);
+    } else {
+      const step = Math.max(15, Math.round(size * 0.1)) * (delta > 0 ? 1 : -1);
+      setTimelineView(view.start + step, view.end + step);
     }
     render();
   }, { passive: false });
