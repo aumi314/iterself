@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>IterSelf</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <aside class="sidebar">
+        <header class="sidebar-topbar">
+          <button id="sidebarToggle" class="sidebar-icon-toggle" type="button" aria-expanded="true"></button>
+        </header>
+        <nav id="nav" class="nav"></nav>
+      </aside>
+      <main class="main">
+        <header class="topbar">
+          <div class="topbar-left"></div>
+          <div class="topbar-center">
+            <div id="eyebrow" class="eyebrow">Local-first desktop app</div>
+            <h2 id="pageTitle">Dashboard</h2>
+          </div>
+          <div class="topbar-right">
+            <button id="rightSidebarToggle" class="right-sidebar-toggle" type="button" data-action="toggle-markdown-sidebar" aria-label="折叠右侧栏" hidden>
+              <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="5" y="4" width="14" height="16" rx="3"></rect>
+                <path d="M14 7v10"></path>
+              </svg>
+            </button>
+          </div>
+        </header>
+        <section id="content" class="content"></section>
+      </main>
+      <div id="toast" class="toast"></div>
+    </div>
+    <script src="markdown-editor.bundle.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
