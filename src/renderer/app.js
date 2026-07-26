@@ -1517,7 +1517,10 @@ function timelineViewRange() {
     } catch (error) {
       saved = null;
     }
-    if (saved && Number.isFinite(saved.start) && Number.isFinite(saved.end) && saved.end > saved.start) {
+    // A stored full-day window would make plain-wheel panning a dead
+    // gesture right after launch; full day is a browsing pose, not a
+    // resting default, so it never survives a restart.
+    if (saved && Number.isFinite(saved.start) && Number.isFinite(saved.end) && saved.end > saved.start && saved.end - saved.start < 24 * 60) {
       setTimelineView(saved.start, saved.end);
     } else {
       const now = timeToMinutes(nowTime()) ?? 12 * 60;
@@ -2137,8 +2140,9 @@ function bindPageEvents() {
 }
 
 function bindTimelineViewEvents() {
-  const container = $('.sidebar-timeline');
-  if (!container) return;
+  if (!$('.sidebar-timeline')) return;
+  // The wheel responds anywhere over the right panel, not just the grid.
+  const container = $('.markdown-workspace');
   const viewport = container.querySelector('[data-timeline-viewport]');
   const scrubber = container.querySelector('[data-timeline-scrubber]');
 
