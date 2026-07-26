@@ -116,8 +116,66 @@ async function testLegacyOkrMigration() {
     const migrated = await store.replace(legacy);
     assert.equal(migrated.objectives[0].startDate, '2026-06-20', 'legacy objective inherits cycle start');
     assert.equal(migrated.objectives[0].endDate, '2026-07-20', 'legacy objective inherits cycle end');
-    assert.equal(migrated.monthlyPlans[0].month, '2026-06', 'legacy month document receives a month key');
-    assert.equal(migrated.monthlyPlans[0].planDoc, 'legacy plan', 'legacy month plan is preserved');
+    const monthPlan = migrated.documents.find((doc) => doc.scope === 'month' && doc.key === '2026-06' && doc.type === 'plan');
+    const monthReview = migrated.documents.find((doc) => doc.scope === 'month' && doc.key === '2026-06' && doc.type === 'review');
+    assert.equal(monthPlan?.content, 'legacy plan', 'legacy month plan lands in documents');
+    assert.equal(monthReview?.content, 'legacy review', 'legacy month review lands in documents');
+    assert.equal(migrated.monthlyPlans.length, 0, 'legacy monthlyPlans collection is emptied');
+  });
+}
+
+async function testDocumentUnification() {
+  await withTempDir(async (dir) => {
+    const store = await createStore(dir);
+    const initial = await store.getData();
+    assert.equal(initial.dailyPlans.length + initial.weeklyPlans.length + initial.visionDocuments.length, 0, 'legacy doc collections start empty');
+    assert.ok(initial.documents.some((doc) => doc.scope === 'vision' && doc.type === 'free'), 'seed vision document exists');
+    assert.ok(initial.documents.some((doc) => doc.scope === 'day' && doc.type === 'plan'), 'seed day plan document exists');
+
+    // A legacy v2 shape migrates fully into documents.
+    const legacy = JSON.parse(JSON.stringify(initial));
+    legacy.version = 2;
+    legacy.documents = [];
+    legacy.dailyPlans = [
+      { date: '2026-07-20', planDoc: 'day plan text', reviewDoc: '', createdAt: '2026-07-20T00:00:00.000Z', updatedAt: '2026-07-20T00:00:00.000Z' },
+      { date: '2026-07-21', planDoc: '', reviewDoc: '', reviewDocCreated: true },
+    ];
+    legacy.weeklyPlans = [{ id: 'w1', weekStart: '2026-07-20', planDoc: 'week plan text', reviewDoc: 'week review text' }];
+    legacy.monthlyPlans = [{ id: 'm1', month: '2026-07', planDoc: 'month plan text', reviewDoc: '' }];
+    legacy.visionDocuments = [{ id: 'vision_legacy', title: 'North star', content: 'vision text', createdAt: '2026-07-01T00:00:00.000Z', updatedAt: '2026-07-01T00:00:00.000Z' }];
+    const migrated = await store.replace(legacy);
+
+    const byKey = (scope, key, type) => migrated.documents.find((doc) => doc.scope === scope && doc.key === key && doc.type === type);
+    assert.equal(byKey('day', '2026-07-20', 'plan')?.content, 'day plan text', 'day plan migrates');
+    assert.ok(!byKey('day', '2026-07-20', 'review'), 'untouched empty review is not materialized');
+    assert.equal(byKey('day', '2026-07-21', 'review')?.content, '', 'explicitly created empty doc survives as a row');
+    assert.equal(byKey('week', '2026-07-20', 'plan')?.content, 'week plan text', 'week plan migrates');
+    assert.equal(byKey('week', '2026-07-20', 'review')?.content, 'week review text', 'week review migrates');
+    assert.equal(byKey('month', '2026-07', 'plan')?.content, 'month plan text', 'month plan migrates');
+    const vision = migrated.documents.find((doc) => doc.id === 'vision_legacy');
+    assert.equal(vision?.content, 'vision text', 'vision doc migrates keeping its id');
+    assert.equal(vision?.title, 'North star', 'vision title preserved');
+    assert.equal(
+      migrated.dailyPlans.length + migrated.weeklyPlans.length + migrated.monthlyPlans.length + migrated.visionDocuments.length,
+      0,
+      'legacy collections emptied after migration'
+    );
+    assert.equal(migrated.version, 3, 'data version bumped to 3');
+
+    // Migration is idempotent across reloads.
+    const store2 = await createStore(dir);
+    const reread = await store2.getData();
+    assert.equal(reread.documents.filter((doc) => doc.scope === 'day' && doc.key === '2026-07-20').length, 1, 'no duplicate documents on reload');
+
+    // Cycle docs are singletons per (scope, key, type); vision docs may repeat.
+    await store.mutate({ type: 'upsert', collection: 'documents', item: { scope: 'day', key: '2026-07-22', type: 'plan', content: 'v1' } });
+    let next = await store.mutate({ type: 'upsert', collection: 'documents', item: { scope: 'day', key: '2026-07-22', type: 'plan', content: 'v2' } });
+    const dayDocs = next.documents.filter((doc) => doc.scope === 'day' && doc.key === '2026-07-22' && doc.type === 'plan');
+    assert.equal(dayDocs.length, 1, 'cycle doc upsert dedupes on scope+key+type');
+    assert.equal(dayDocs[0].content, 'v2', 'latest content wins');
+    await store.mutate({ type: 'upsert', collection: 'documents', item: { scope: 'vision', key: null, type: 'free', title: 'A', content: 'a' } });
+    next = await store.mutate({ type: 'upsert', collection: 'documents', item: { scope: 'vision', key: null, type: 'free', title: 'B', content: 'b' } });
+    assert.ok(next.documents.filter((doc) => doc.scope === 'vision').length >= 3, 'vision documents coexist as a pool');
   });
 }
 
@@ -188,12 +246,12 @@ async function testDataSafety() {
     // Seed plus two mutations so .bak holds a meaningful previous version.
     let store = await createStore(dir);
     await store.getData();
-    await store.mutate({ type: 'upsert', collection: 'visionDocuments', item: { title: 'Safety A', content: 'a' } });
-    await store.mutate({ type: 'upsert', collection: 'visionDocuments', item: { title: 'Safety B', content: 'b' } });
+    await store.mutate({ type: 'upsert', collection: 'documents', item: { scope: 'vision', key: null, type: 'free', title: 'Safety A', content: 'a' } });
+    await store.mutate({ type: 'upsert', collection: 'documents', item: { scope: 'vision', key: null, type: 'free', title: 'Safety B', content: 'b' } });
 
     const bak = JSON.parse(await fs.readFile(bakPath, 'utf8'));
-    assert.ok(bak.visionDocuments.some((doc) => doc.title === 'Safety A'), 'bak keeps the previous version');
-    assert.ok(!bak.visionDocuments.some((doc) => doc.title === 'Safety B'), 'bak stays one write behind');
+    assert.ok(bak.documents.some((doc) => doc.title === 'Safety A'), 'bak keeps the previous version');
+    assert.ok(!bak.documents.some((doc) => doc.title === 'Safety B'), 'bak stays one write behind');
     const dataFiles = await fs.readdir(path.join(dir, 'data'));
     assert.ok(!dataFiles.some((name) => name.endsWith('.tmp')), 'no tmp residue after writes');
 
@@ -201,8 +259,8 @@ async function testDataSafety() {
     await fs.writeFile(dataPath, 'not json {{{', 'utf8');
     store = await createStore(dir);
     const recovered = await store.getData();
-    assert.ok(recovered.visionDocuments.some((doc) => doc.title === 'Safety A'), 'recovery restores bak content');
-    assert.ok(!recovered.visionDocuments.some((doc) => doc.title === 'Safety B'), 'recovery is one write behind by design');
+    assert.ok(recovered.documents.some((doc) => doc.title === 'Safety A'), 'recovery restores bak content');
+    assert.ok(!recovered.documents.some((doc) => doc.title === 'Safety B'), 'recovery is one write behind by design');
     const afterRecovery = await fs.readdir(path.join(dir, 'data'));
     const quarantine = afterRecovery.find((name) => name.includes('corrupt'));
     assert.ok(quarantine, 'corrupt file is preserved');
@@ -212,7 +270,7 @@ async function testDataSafety() {
     await fs.rm(dataPath, { force: true });
     store = await createStore(dir);
     const restored = await store.getData();
-    assert.ok(restored.visionDocuments.some((doc) => doc.title === 'Safety A'), 'missing file restores from bak');
+    assert.ok(restored.documents.some((doc) => doc.title === 'Safety A'), 'missing file restores from bak');
 
     // Corrupt main and no bak: quarantine and reseed without throwing.
     await fs.writeFile(dataPath, '###', 'utf8');
@@ -260,6 +318,7 @@ async function main() {
   testPureHelpers();
   await testStoreLifecycle();
   await testLegacyOkrMigration();
+  await testDocumentUnification();
   await testDataSafety();
   await testAutoBackupRotation();
   await testExportBundle();

@@ -1,7 +1,7 @@
 const path = require('node:path');
 const fs = require('node:fs/promises');
 
-const DATA_VERSION = 2;
+const DATA_VERSION = 3;
 const AUTO_BACKUP_KEEP = 14;
 
 function nowIso() {
@@ -78,15 +78,11 @@ function createInitialData() {
     keyResults: [
       { id: kr, objectiveId: objective, title: 'Complete 7 daily reviews and 1 weekly review', note: 'Sample key result note.', type: 'count', targetValue: 8, currentValue: 0, unit: 'reviews', createdAt, updatedAt: createdAt },
     ],
-    weeklyPlans: [
-      { id: id('week'), weekStart, planDoc: '# Weekly Plan\n\n## Strategic tasks\n\n- Choose from the task pool.\n\n## Resource estimate\n\n', reviewDoc: '# Weekly Review\n\n## Recognize reality\n\n## Analyze and improve\n\n', createdAt, updatedAt: createdAt },
-    ],
+    weeklyPlans: [],
     weeklyTaskBindings: [
       { id: id('wt'), weekStart, taskId: design, createdAt, updatedAt: createdAt },
     ],
-    dailyPlans: [
-      { date: today, planDoc: '# Daily Plan\n\n## Today\n\n', reviewDoc: '# Daily Review\n\n## Recognize reality\n\n## Analyze and improve\n\n', createdAt, updatedAt: createdAt },
-    ],
+    dailyPlans: [],
     dailyTaskBindings: [
       { id: id('dt'), date: today, taskId: design, createdAt, updatedAt: createdAt },
     ],
@@ -94,8 +90,13 @@ function createInitialData() {
     scheduleBlocks: [],
     timeEntries: [],
     insights: [],
-    visionDocuments: [
-      { id: id('vision'), title: 'Vision seed', content: '# Vision\n\nWhat kind of person do I want to become? What do I want to create? What contribution do I want to make?\n', createdAt, updatedAt: createdAt },
+    visionDocuments: [],
+    documents: [
+      { id: id('doc'), scope: 'week', key: weekStart, type: 'plan', title: '', content: '# Weekly Plan\n\n## Strategic tasks\n\n- Choose from the task pool.\n\n## Resource estimate\n\n', createdAt, updatedAt: createdAt },
+      { id: id('doc'), scope: 'week', key: weekStart, type: 'review', title: '', content: '# Weekly Review\n\n## Recognize reality\n\n## Analyze and improve\n\n', createdAt, updatedAt: createdAt },
+      { id: id('doc'), scope: 'day', key: today, type: 'plan', title: '', content: '# Daily Plan\n\n## Today\n\n', createdAt, updatedAt: createdAt },
+      { id: id('doc'), scope: 'day', key: today, type: 'review', title: '', content: '# Daily Review\n\n## Recognize reality\n\n## Analyze and improve\n\n', createdAt, updatedAt: createdAt },
+      { id: id('doc'), scope: 'vision', key: null, type: 'free', title: 'Vision seed', content: '# Vision\n\nWhat kind of person do I want to become? What do I want to create? What contribution do I want to make?\n', createdAt, updatedAt: createdAt },
     ],
     templates: {
       dayPlan: '# Daily Plan\n\n## Today\n\n',
@@ -167,6 +168,62 @@ function ensureArrays(data) {
         updatedAt: cycle.updatedAt,
       }));
   }
+
+  // v3: all markdown documents live in one collection. Absorb the legacy
+  // per-cycle doc fields and vision pool, then keep the legacy arrays empty so
+  // re-imported old backups migrate the same way. `documents` must default to
+  // [] here, not to the seed, or upgrading a legacy file would inject samples.
+  if (!Array.isArray(data.documents)) data.documents = [];
+  const documentExists = (scope, key, type) => data.documents.some((doc) => doc.scope === scope && doc.key === key && doc.type === type);
+  const migrateCycleDocs = (scope, key, entry) => {
+    for (const type of ['plan', 'review']) {
+      const content = type === 'plan' ? entry.planDoc : entry.reviewDoc;
+      const created = type === 'plan' ? entry.planDocCreated : entry.reviewDocCreated;
+      if (!content && !created) continue;
+      if (documentExists(scope, key, type)) continue;
+      data.documents.push({
+        id: id('doc'),
+        scope,
+        key,
+        type,
+        title: '',
+        content: content || '',
+        createdAt: entry.createdAt || nowIso(),
+        updatedAt: entry.updatedAt || nowIso(),
+      });
+    }
+  };
+  data.dailyPlans.forEach((entry) => migrateCycleDocs('day', entry.date, entry));
+  data.weeklyPlans.forEach((entry) => migrateCycleDocs('week', entry.weekStart, entry));
+  data.monthlyPlans.forEach((entry) => migrateCycleDocs('month', entry.month, entry));
+  data.visionDocuments.forEach((entry) => {
+    if (data.documents.some((doc) => doc.id === entry.id)) return;
+    data.documents.push({
+      id: entry.id || id('doc'),
+      scope: 'vision',
+      key: null,
+      type: 'free',
+      title: entry.title || '',
+      content: entry.content || '',
+      createdAt: entry.createdAt || nowIso(),
+      updatedAt: entry.updatedAt || nowIso(),
+    });
+  });
+  data.dailyPlans = [];
+  data.weeklyPlans = [];
+  data.monthlyPlans = [];
+  data.visionDocuments = [];
+  data.documents = data.documents.map((entry) => ({
+    id: entry.id,
+    scope: entry.scope,
+    key: entry.key ?? null,
+    type: entry.type || (entry.scope === 'vision' ? 'free' : 'plan'),
+    title: entry.title || '',
+    content: entry.content || '',
+    createdAt: entry.createdAt,
+    updatedAt: entry.updatedAt,
+  }));
+
   data.weeklyTaskBindings = data.weeklyTaskBindings.map((entry) => ({
     id: entry.id,
     weekStart: entry.weekStart,
@@ -354,7 +411,15 @@ async function createStore(userDataDir) {
         createdAt: item.createdAt || nowIso(),
         updatedAt: nowIso(),
       };
-      const index = data[collection].findIndex((entry) => entry.id === nextItem.id || entry.date === nextItem.date && collection === 'dailyPlans');
+      const index = data[collection].findIndex((entry) => {
+        if (entry.id === nextItem.id) return true;
+        if (collection === 'dailyPlans' && entry.date === nextItem.date) return true;
+        // Cycle documents are singletons per (scope, key, type); vision docs
+        // are an open pool and may repeat freely.
+        if (collection === 'documents' && nextItem.scope && nextItem.scope !== 'vision'
+          && entry.scope === nextItem.scope && entry.key === nextItem.key && entry.type === nextItem.type) return true;
+        return false;
+      });
       if (index >= 0) data[collection][index] = { ...data[collection][index], ...nextItem, updatedAt: nowIso() };
       else data[collection].push(nextItem);
     }
@@ -527,6 +592,7 @@ function prefixFor(collection) {
     timeEntries: 'te',
     insights: 'ins',
     visionDocuments: 'vision',
+    documents: 'doc',
   };
   return map[collection] || 'id';
 }

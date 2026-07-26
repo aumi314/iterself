@@ -130,7 +130,10 @@ function makeMarkdownBundle(data) {
   const activeWeekStart = data.meta?.activeWeekStart || activeDate;
   const days = dateRange(activeWeekStart, 7);
   const taskById = new Map(data.tasks.map((task) => [task.id, task]));
-  const weekPlan = data.weeklyPlans.find((week) => week.weekStart === activeWeekStart);
+  const findDocumentContent = (scope, key, type) => (data.documents || [])
+    .find((doc) => doc.scope === scope && doc.key === key && doc.type === type)?.content || '';
+  const weekPlanContent = findDocumentContent('week', activeWeekStart, 'plan');
+  const weekReviewContent = findDocumentContent('week', activeWeekStart, 'review');
   const weeklyBindings = data.weeklyTaskBindings.filter((binding) => binding.weekStart === activeWeekStart);
   const lines = [];
 
@@ -143,14 +146,14 @@ function makeMarkdownBundle(data) {
 
   lines.push('## Current week summary');
   lines.push('');
-  if (weekPlan) {
+  if (weekPlanContent || weekReviewContent) {
     lines.push('### Weekly plan document');
     lines.push('');
-    lines.push(weekPlan.planDoc || '');
+    lines.push(weekPlanContent);
     lines.push('');
     lines.push('### Weekly review document');
     lines.push('');
-    lines.push(weekPlan.reviewDoc || '');
+    lines.push(weekReviewContent);
     lines.push('');
   }
 
@@ -167,18 +170,17 @@ function makeMarkdownBundle(data) {
   lines.push('');
   for (const day of days) {
     const summary = summarizeDay(data, day);
-    const plan = data.dailyPlans.find((entry) => entry.date === day);
     lines.push(`### ${day}`);
     lines.push('');
     lines.push(`Focus time: ${summary.focusMinutes} min`);
     lines.push('');
     lines.push('#### Daily plan document');
     lines.push('');
-    lines.push(plan?.planDoc || '');
+    lines.push(findDocumentContent('day', day, 'plan'));
     lines.push('');
     lines.push('#### Daily review document');
     lines.push('');
-    lines.push(plan?.reviewDoc || '');
+    lines.push(findDocumentContent('day', day, 'review'));
     lines.push('');
     lines.push('#### Tasks');
     lines.push('');
