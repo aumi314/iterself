@@ -666,6 +666,56 @@ label {
   pointer-events: none;
 }
 
+.task-picker {
+  display: grid;
+  gap: 10px;
+}
+
+.task-picker-list {
+  max-height: 420px;
+  overflow-y: auto;
+  display: grid;
+  gap: 4px;
+}
+
+.task-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.task-picker-row:hover {
+  border-color: var(--line);
+  background: var(--panel);
+}
+
+.task-picker-row.bound {
+  border-color: var(--accent);
+  background: var(--accent-2);
+}
+
+.task-picker-check {
+  width: 16px;
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.task-picker-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .timeline-block.armed {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent);

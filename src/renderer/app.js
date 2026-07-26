@@ -45,6 +45,7 @@ const ZH = {
   'Event categories': '事件分类', 'Category tree': '分类结构',
   'Vision documents': '愿景文档', 'Editor': '编辑器',
   'Add daily task': '添加日任务', 'Add block': '添加日计划', 'Add time record': '添加时间记录',
+  'Pick weekly tasks': '选择周任务', 'Pick daily tasks': '选择日任务',
   'Capture insight': '记录心得', 'Add weekly commitment': '添加周任务', 'Add objective': '添加目标',
   'Add KR': '添加 KR', 'Add task': '添加任务', 'Add category': '添加分类', 'Add vision doc': '添加愿景文档',
   'Edit objective': '编辑目标',
@@ -161,6 +162,8 @@ let state = {
   timelineView: null,
   timelineSelection: null,
   timelineBlockSelection: null,
+  taskPickerScope: null,
+  taskPickerQuery: '',
   modal: null,
 };
 
@@ -1295,8 +1298,10 @@ function renderScheduleWeek() {
   return `
     <div class="grid">
       <section class="card">
-        <h3>Set weekly tasks</h3>
-        ${weeklyTaskForm(weekStart)}
+        <div class="section-head">
+          <h3>Set weekly tasks</h3>
+          <div class="toolbar"><button class="small secondary" data-action="open-task-picker" data-scope="week">+ ${t('Weekly tasks')}</button></div>
+        </div>
         <div class="hr"></div>
         <div class="list">${bindings.length ? bindings.map(weeklyTaskRow).join('') : '<div class="empty">Choose tasks from the task pool for this week.</div>'}</div>
       </section>
@@ -1347,8 +1352,10 @@ function renderScheduleDay() {
   return `
     <div class="grid">
       <section class="card">
-        <h3>Daily tasks</h3>
-        ${dailyTaskForm(date)}
+        <div class="section-head">
+          <h3>Daily tasks</h3>
+          <div class="toolbar"><button class="small secondary" data-action="open-task-picker" data-scope="day">+ ${t('Daily tasks')}</button></div>
+        </div>
         <div class="hr"></div>
         <div class="list">${dayTasks.length ? dayTasks.map(dailyTaskRow).join('') : '<div class="empty">No daily tasks. Bind one from the task pool.</div>'}</div>
       </section>
@@ -1421,6 +1428,10 @@ function renderModal() {
       title: `${state.selectedCycleDocKey} ${t(cycleDocTitle(state.selectedCycleDocScope, state.selectedCycleDocType))}`,
       body: cycleDocModalBody(cycleDoc, state.selectedCycleDocScope, state.selectedCycleDocType),
     } : null,
+    'task-picker': state.taskPickerScope ? {
+      title: state.taskPickerScope === 'week' ? 'Pick weekly tasks' : 'Pick daily tasks',
+      body: taskPickerBody(state.taskPickerScope),
+    } : null,
   }[state.modal];
   if (!modalContent) return '';
   return `
@@ -1485,13 +1496,32 @@ function confirmDeleteTaskBody(task) {
   `;
 }
 
-function dailyTaskForm(date) {
+function taskPickerBody(scope) {
+  const en = state.data?.settings?.language === 'en';
+  const query = state.taskPickerQuery || '';
+  const boundIds = new Set(scope === 'week'
+    ? collection('weeklyTaskBindings').filter((binding) => binding.weekStart === activeWeekStart()).map((binding) => binding.taskId)
+    : collection('dailyTaskBindings').filter((binding) => binding.date === activeDate()).map((binding) => binding.taskId));
+  const rows = treeItems(collection('tasks')).map(({ item, depth }) => {
+    const bound = boundIds.has(item.id);
+    const searchText = getTaskPath(item.id).toLowerCase();
+    const hidden = query && !searchText.includes(query);
+    return `
+      <button type="button" class="task-picker-row ${bound ? 'bound' : ''}" ${hidden ? 'hidden' : ''}
+        data-action="toggle-task-binding" data-id="${item.id}" data-search="${escapeHtml(searchText)}"
+        style="padding-left:${10 + depth * 18}px;">
+        <span class="task-picker-check">${bound ? '✓' : ''}</span>
+        <span class="task-picker-title">${escapeHtml(item.title)}</span>
+        <span class="badge ${taskStatusBadgeClass(item.status)}">${t(normalizeTaskStatus(item.status))}</span>
+      </button>
+    `;
+  }).join('');
   return `
-    <form data-form="daily-task" class="form-grid">
-      <input type="hidden" name="date" value="${escapeHtml(date)}" />
-      <label class="span2">Task from pool<select name="taskId" required>${optionList(taskOptions(), '')}</select></label>
-      <div class="span2"><button type="submit">Add daily task</button></div>
-    </form>
+    <div class="task-picker">
+      <input id="taskPickerSearch" type="text" value="${escapeHtml(query)}" placeholder="${en ? 'Search tasks…' : '搜索任务…'}" autocomplete="off" />
+      <div class="task-picker-list">${rows || `<div class="empty">${en ? 'Task pool is empty.' : '任务池是空的。'}</div>`}</div>
+      <div class="empty compact">${en ? 'Click to bind or unbind. Changes apply immediately.' : '点击任务即绑定/解绑，立即生效。'}</div>
+    </div>
   `;
 }
 
@@ -1776,15 +1806,6 @@ function insightRow(insight) {
         <div class="row-actions"><button class="small danger" data-action="delete" data-collection="insights" data-id="${insight.id}">Delete</button></div>
       </div>
     </div>
-  `;
-}
-
-function weeklyTaskForm(weekStart) {
-  return `
-    <form data-form="weekly-task" class="form-grid">
-      <label class="span2">Task from pool<select name="taskId" required>${optionList(taskOptions(), '')}</select></label>
-      <div class="span2"><button type="submit">Add weekly commitment</button></div>
-    </form>
   `;
 }
 
@@ -2193,6 +2214,17 @@ function bindPageEvents() {
   $$('[data-action]').forEach((element) => {
     element.addEventListener('click', handleAction);
   });
+  const pickerSearch = $('#taskPickerSearch');
+  if (pickerSearch) {
+    // Filtering hides rows directly — no re-render, so typing never loses
+    // focus; the query survives toggle re-renders via state.
+    pickerSearch.addEventListener('input', () => {
+      state.taskPickerQuery = pickerSearch.value.trim().toLowerCase();
+      $$('.task-picker-row').forEach((row) => {
+        row.hidden = Boolean(state.taskPickerQuery) && !row.dataset.search.includes(state.taskPickerQuery);
+      });
+    });
+  }
   bindTimeInputEvents();
   bindTimelineViewEvents();
   bindTaskSelectionEvents();
@@ -2746,9 +2778,7 @@ async function handleFormSubmit(event) {
   }
 
   const payloads = {
-    'daily-task': () => ({ collection: 'dailyTaskBindings', item: { id: uid('dt'), date: values.date || activeDate(), taskId: values.taskId } }),
     insight: () => ({ collection: 'insights', item: { id: uid('ins'), timestamp: new Date(`${values.date || activeDate()}T${values.time || nowTime()}:00`).toISOString(), date: values.date || activeDate(), time: values.time || nowTime(), content: values.content, taskId: values.taskId || null, timeEntryId: values.timeEntryId || null, note: values.note || '' } }),
-    'weekly-task': () => ({ collection: 'weeklyTaskBindings', item: { id: uid('wt'), weekStart: activeWeekStart(), taskId: values.taskId } }),
     task: () => ({ collection: 'tasks', item: { id: uid('task'), parentId: values.parentId || null, title: values.title, type: values.type, status: values.status, estimatedMinutes: Number(values.estimatedMinutes || 0), note: values.note || '' } }),
     category: () => ({ collection: 'eventCategories', item: { id: uid('cat'), parentId: values.parentId || null, name: values.name, focus: values.focus === 'true', color: values.color || '#2f6f5e' } }),
     vision: () => ({ collection: 'documents', item: { id: uid('doc'), scope: 'vision', key: null, type: 'free', title: values.title, content: values.content } }),
@@ -2775,6 +2805,31 @@ async function handleAction(event) {
 }
 
 async function runAction(action, el) {
+  if (action === 'open-task-picker') {
+    state.taskPickerScope = el.dataset.scope === 'week' ? 'week' : 'day';
+    state.taskPickerQuery = '';
+    state.modal = 'task-picker';
+    render();
+    $('#taskPickerSearch')?.focus();
+    return;
+  }
+
+  if (action === 'toggle-task-binding') {
+    const scope = state.taskPickerScope;
+    const taskId = el.dataset.id;
+    if (!scope || !taskId) return;
+    if (scope === 'week') {
+      const existing = collection('weeklyTaskBindings').find((binding) => binding.weekStart === activeWeekStart() && binding.taskId === taskId);
+      if (existing) await mutate({ type: 'delete', collection: 'weeklyTaskBindings', id: existing.id }, 'Deleted');
+      else await mutate({ type: 'upsert', collection: 'weeklyTaskBindings', item: { id: uid('wt'), weekStart: activeWeekStart(), taskId } }, 'Saved');
+    } else {
+      const existing = collection('dailyTaskBindings').find((binding) => binding.date === activeDate() && binding.taskId === taskId);
+      if (existing) await mutate({ type: 'delete', collection: 'dailyTaskBindings', id: existing.id }, 'Deleted');
+      else await mutate({ type: 'upsert', collection: 'dailyTaskBindings', item: { id: uid('dt'), date: activeDate(), taskId } }, 'Saved');
+    }
+    return;
+  }
+
   if (action === 'select-timeline-block') {
     state.timelineBlockSelection = { collection: el.dataset.collection, id: el.dataset.id };
     state.timelineSelection = null;
