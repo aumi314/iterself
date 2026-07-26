@@ -544,6 +544,9 @@ label {
   position: absolute;
   left: -40px;
   top: -9px;
+  padding: 1px 4px;
+  border-radius: 5px;
+  background: var(--panel);
   color: #F2C879;
   font-size: 10px;
   font-weight: 800;

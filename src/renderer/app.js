@@ -1028,15 +1028,19 @@ function renderSidebarTimeline() {
   `;
   const hourMarks = timelineHourMarks(range, 120);
   const nowMinutes = timeToMinutes(nowTime());
-  const nowLine = date === today && nowMinutes !== null
+  const showNow = date === today && nowMinutes !== null;
+  const nowLine = showNow
     ? `<div class="timeline-now-line" style="top:${timelinePercent(nowMinutes, range)}%;"><span>${escapeHtml(nowTime())}</span></div>`
     : '';
+  // An hour label sitting under the now-line label is unreadable — the
+  // dashed line stays, only the colliding text yields.
+  const axisMarks = hourMarks.filter((minute) => !(showNow && Math.abs(minute - nowMinutes) < 35));
   return `
     ${heading}
     <div class="sidebar-timeline">
       <div class="day-timeline-body sidebar-timeline-body">
         <div class="timeline-axis">
-          ${hourMarks.map((minute) => `<div class="timeline-hour-label" style="top:${timelinePercent(minute, range)}%;">${minute === 24 * 60 ? '24:00' : `${String(Math.floor(minute / 60)).padStart(2, '0')}:00`}</div>`).join('')}
+          ${axisMarks.map((minute) => `<div class="timeline-hour-label" style="top:${timelinePercent(minute, range)}%;">${minute === 24 * 60 ? '24:00' : `${String(Math.floor(minute / 60)).padStart(2, '0')}:00`}</div>`).join('')}
         </div>
         <div class="timeline-track planned-track">
           ${hourMarks.map((minute) => `<div class="timeline-hour-line" style="top:${timelinePercent(minute, range)}%;"></div>`).join('')}
