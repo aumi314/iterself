@@ -36,7 +36,7 @@ const ZH = {
   'Today at a glance': '今日概览', 'Current week': '本周概览', 'Related OKR': '相关 OKR',
   'Daily tasks': '日任务', 'Schedule blocks': '日计划', 'Time records': '时间记录',
   'Add schedule block': '新增日计划', 'Add time record': '新增时间记录', 'Add insight': '新增心得',
-  'Daily plan document': '计划文档', 'Daily review document': '复盘文档',
+  'Daily plan document': '日规划', 'Daily review document': '日复盘',
   'Weekly task commitments': '周任务', 'Week focus table': '本周记录',
   'Weekly planning document': '周规划', 'Weekly review document': '周复盘',
   'Monthly planning document': '月规划', 'Monthly review document': '月复盘',
@@ -51,7 +51,7 @@ const ZH = {
   'Edit objective': '编辑目标',
   'Add key result': '新增 Key Result',
   'Key result detail': 'Key Result 详情',
-  'Save plan': '保存计划', 'Save review': '保存复盘', 'Save weekly plan': '保存周规划',
+  'Save plan': '保存日规划', 'Save review': '保存日复盘', 'Save weekly plan': '保存周规划',
   'Save weekly review': '保存周复盘', 'Save month plan': '保存月规划', 'Save month review': '保存月复盘',
   'Save': '保存', 'Save value': '保存数值', 'Save vision': '保存愿景', 'Delete': '删除', 'Edit': '编辑',
   'Start timer now': '现在开始计时', 'Cancel timer': '取消计时', 'Choose folder': '选择文件夹',
@@ -1183,7 +1183,7 @@ function renderMarkdownWorkspace() {
 function markdownWorkspaceTitle(doc) {
   if (!doc) return '';
   if (doc.kind === 'daily') {
-    return `${doc.date} ${doc.type === 'review' ? '复盘文档' : '计划文档'}`;
+    return `${doc.date} ${doc.type === 'review' ? '日复盘' : '日规划'}`;
   }
   if (doc.kind === 'vision') {
     const vision = collection('documents').find((item) => item.id === doc.id);
@@ -1422,7 +1422,7 @@ function renderModal() {
       body: confirmDeleteTaskBody(confirmTask),
     } : null,
     'daily-doc': state.selectedDailyDocDate ? {
-      title: `${state.selectedDailyDocDate} ${state.selectedDailyDocType === 'review' ? '复盘文档' : '计划文档'}`,
+      title: `${state.selectedDailyDocDate} ${state.selectedDailyDocType === 'review' ? '日复盘' : '日规划'}`,
       body: dailyDocModalBody(dailyDoc, state.selectedDailyDocType),
     } : null,
     'cycle-doc': state.selectedCycleDocScope && state.selectedCycleDocKey ? {
