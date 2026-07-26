@@ -2142,24 +2142,29 @@ function bindTimelineViewEvents() {
   const viewport = container.querySelector('[data-timeline-viewport]');
   const scrubber = container.querySelector('[data-timeline-scrubber]');
 
+  // Verified against ManicTime's DayTimelinesView.Timelines_PreviewMouseWheel:
+  // plain wheel zooms (anchored at the cursor; centre over the range
+  // selector), Ctrl+wheel moves the window.
   container.addEventListener('wheel', (event) => {
-    if (!event.shiftKey && !event.ctrlKey) return;
     event.preventDefault();
     // Chromium reports Shift+vertical-wheel as deltaX.
     const delta = event.deltaY !== 0 ? event.deltaY : event.deltaX;
     if (delta === 0) return;
     const view = timelineViewRange();
     const size = view.end - view.start;
-    if (event.shiftKey) {
+    if (event.ctrlKey) {
+      const step = Math.max(15, Math.round(size * 0.1)) * (delta > 0 ? 1 : -1);
+      setTimelineView(view.start + step, view.end + step);
+    } else {
+      const overScrubber = Boolean(event.target.closest('[data-timeline-scrubber]'));
       const rect = viewport.getBoundingClientRect();
-      const anchorRatio = Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height));
+      const anchorRatio = overScrubber
+        ? 0.5
+        : Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height));
       const anchor = view.start + size * anchorRatio;
       const nextSize = size * (delta > 0 ? 1.25 : 0.8);
       const start = anchor - anchorRatio * nextSize;
       setTimelineView(start, start + nextSize);
-    } else {
-      const step = Math.max(15, Math.round(size * 0.1)) * (delta > 0 ? 1 : -1);
-      setTimelineView(view.start + step, view.end + step);
     }
     render();
   }, { passive: false });
