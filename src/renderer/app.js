@@ -167,6 +167,29 @@ const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 
 let timelineDragActive = false;
+let timelinePointerY = null;
+
+// Re-renders rebuild the guide element hidden; this restores it at the
+// remembered cursor position (wheel navigation re-renders without any
+// mousemove to bring it back).
+function updateTimelineGuide(clientY) {
+  if (clientY === null || timelineDragActive) return;
+  const viewport = $('[data-timeline-viewport]');
+  const guide = $('[data-timeline-guide]');
+  if (!viewport || !guide) return;
+  const rect = viewport.getBoundingClientRect();
+  if (clientY < rect.top || clientY > rect.bottom) {
+    guide.hidden = true;
+    return;
+  }
+  const view = timelineViewRange();
+  const minute = Math.max(0, Math.min(24 * 60, Math.round(
+    view.start + ((clientY - rect.top) / rect.height) * (view.end - view.start)
+  )));
+  guide.hidden = false;
+  guide.style.top = `${timelinePercent(minute, view)}%`;
+  guide.querySelector('span').textContent = minutesToTimeValue(minute);
+}
 
 function uid(prefix = 'id') {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -2199,7 +2222,9 @@ function bindTimelineViewEvents() {
       const step = Math.max(15, Math.round(size * 0.1)) * (delta > 0 ? 1 : -1);
       setTimelineView(view.start + step, view.end + step);
     }
+    timelinePointerY = event.clientY;
     render();
+    updateTimelineGuide(timelinePointerY);
   }, { passive: false });
 
   if (!scrubber) return;
@@ -2268,14 +2293,11 @@ function bindTimelineViewEvents() {
   };
 
   viewport.addEventListener('mousemove', (event) => {
-    if (!guide || timelineDragActive) return;
-    const view = timelineViewRange();
-    const minute = clampMinutes(minuteAtFactory()(event.clientY));
-    guide.hidden = false;
-    guide.style.top = `${timelinePercent(minute, view)}%`;
-    guide.querySelector('span').textContent = minutesToTimeValue(minute);
+    timelinePointerY = event.clientY;
+    updateTimelineGuide(event.clientY);
   });
   viewport.addEventListener('mouseleave', () => {
+    timelinePointerY = null;
     if (guide) guide.hidden = true;
   });
 
