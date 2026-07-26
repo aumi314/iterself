@@ -1034,11 +1034,6 @@ function renderSidebarTimeline() {
   return `
     ${heading}
     <div class="sidebar-timeline">
-      <div class="sidebar-timeline-head">
-        <div></div>
-        <button class="small secondary" data-action="open-schedule-modal">+ ${t('Schedule blocks')}</button>
-        <button class="small secondary" data-action="open-time-entry-modal">+ ${t('Time records')}</button>
-      </div>
       <div class="day-timeline-body sidebar-timeline-body">
         <div class="timeline-axis">
           ${hourMarks.map((minute) => `<div class="timeline-hour-label" style="top:${timelinePercent(minute, range)}%;">${minute === 24 * 60 ? '24:00' : `${String(Math.floor(minute / 60)).padStart(2, '0')}:00`}</div>`).join('')}
