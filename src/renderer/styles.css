@@ -583,13 +583,18 @@ label {
   background: var(--accent);
 }
 
-.sidebar-timeline-body {
-  grid-template-columns: 44px minmax(0, 1fr) minmax(0, 1fr);
+/* Doubled selector so these beat the later base .day-timeline-body rules
+   (84px axis) and the responsive override at equal specificity. */
+.sidebar-timeline .sidebar-timeline-body {
+  grid-template-columns: 38px minmax(0, 1fr) minmax(0, 1fr);
   gap: 8px;
   position: relative;
+  min-height: 0;
 }
 
-.sidebar-timeline-body .timeline-hour-label {
+.sidebar-timeline .timeline-hour-label {
+  left: auto;
+  right: 0;
   font-size: 11px;
 }
 
@@ -609,7 +614,7 @@ label {
 
 .timeline-guide {
   position: absolute;
-  left: 40px;
+  left: 46px;
   right: 0;
   border-top: 1px dashed rgba(160, 160, 160, 0.55);
   z-index: 5;
@@ -618,7 +623,8 @@ label {
 
 .timeline-guide span {
   position: absolute;
-  left: -40px;
+  left: auto;
+  right: calc(100% + 4px);
   top: -9px;
   padding: 1px 4px;
   border-radius: 5px;
@@ -682,7 +688,7 @@ label {
 
 .timeline-now-line {
   position: absolute;
-  left: 40px;
+  left: 46px;
   right: 0;
   border-top: 2px solid #F2C879;
   z-index: 6;
@@ -691,7 +697,8 @@ label {
 
 .timeline-now-line span {
   position: absolute;
-  left: -40px;
+  left: auto;
+  right: calc(100% + 4px);
   top: -9px;
   padding: 1px 4px;
   border-radius: 5px;
@@ -1175,11 +1182,13 @@ label {
   gap: 8px;
 }
 
-.month-timeline {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 12px;
-  align-items: stretch;
+.timeline-title-month {
+  width: 160px;
+}
+
+.month-chip.today:not(.active) {
+  border-color: var(--accent);
+  background: var(--accent-2);
 }
 
 .month-strip {

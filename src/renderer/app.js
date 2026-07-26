@@ -500,12 +500,6 @@ function monthDate(monthKey) {
   return `${monthKey}-01`;
 }
 
-function monthHalfStart(monthKey) {
-  const [year, month] = monthKey.split('-').map(Number);
-  const startMonth = month <= 6 ? 1 : 7;
-  return `${year}-${String(startMonth).padStart(2, '0')}`;
-}
-
 function monthLabel(monthKey) {
   const date = new Date(`${monthDate(monthKey)}T00:00:00`);
   return state.data?.settings?.language === 'en'
@@ -1815,20 +1809,32 @@ function renderMonth() {
 }
 
 function monthTimeline(monthKey) {
-  const pageStart = monthHalfStart(monthKey);
-  const months = [0, 1, 2, 3, 4, 5].map((offset) => addMonths(pageStart, offset));
+  const en = state.data?.settings?.language === 'en';
+  const thisMonth = calendarDateIso(new Date()).slice(0, 7);
+  const months = [-2, -1, 0, 1, 2, 3].map((offset) => addMonths(monthKey, offset));
+  const chipLabel = (item) => {
+    const dateObj = new Date(`${item}-01T00:00:00`);
+    return en ? dateObj.toLocaleDateString('en-US', { month: 'short' }) : `${dateObj.getMonth() + 1}月`;
+  };
   return `
-    <section class="card month-timeline">
-      <button class="small ghost" data-action="month-prev">←</button>
+    <section class="card schedule-timeline">
+      <div class="timeline-bar">
+        <button class="small ghost" data-action="month-today">${en ? 'This month' : '本月'}</button>
+        <div class="timeline-center">
+          <button class="small ghost" data-action="month-prev" aria-label="${en ? 'Previous month' : '上一月'}">←</button>
+          <div class="timeline-title timeline-title-month">${escapeHtml(monthLabel(monthKey))}</div>
+          <button class="small ghost" data-action="month-next" aria-label="${en ? 'Next month' : '下一月'}">→</button>
+        </div>
+        <div></div>
+      </div>
       <div class="month-strip">
         ${months.map((item) => `
-          <button class="month-chip ${item === monthKey ? 'active' : ''}" data-action="month-select" data-month="${item}">
-            <strong>${escapeHtml(monthLabel(item))}</strong>
-            <small>${item}</small>
+          <button class="month-chip ${item === monthKey ? 'active' : ''} ${item === thisMonth ? 'today' : ''}" data-action="month-select" data-month="${item}">
+            <strong>${escapeHtml(chipLabel(item))}</strong>
+            <small>${item.slice(0, 4)}${item === thisMonth ? ` · ${en ? 'now' : '今'}` : ''}</small>
           </button>
         `).join('')}
       </div>
-      <button class="small ghost" data-action="month-next">→</button>
     </section>
   `;
 }
@@ -2910,12 +2916,18 @@ async function runAction(action, el) {
   }
 
   if (action === 'month-prev' || action === 'month-next') {
-    const currentMonth = monthBounds().monthKey;
-    const pageStart = monthHalfStart(currentMonth);
-    const nextMonth = addMonths(pageStart, action === 'month-prev' ? -6 : 6);
+    const nextMonth = addMonths(monthBounds().monthKey, action === 'month-prev' ? -1 : 1);
     const nextDate = monthDate(nextMonth);
     state.modal = null;
     state.data = await window.iterself.mutate({ type: 'setMeta', patch: { activeDate: nextDate, activeWeekStart: startOfWeekIso(nextDate) } });
+    render();
+    return;
+  }
+
+  if (action === 'month-today') {
+    const today = calendarDateIso(new Date());
+    state.modal = null;
+    state.data = await window.iterself.mutate({ type: 'setMeta', patch: { activeDate: today, activeWeekStart: startOfWeekIso(today) } });
     render();
     return;
   }
