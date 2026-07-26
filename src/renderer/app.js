@@ -1146,7 +1146,7 @@ function scheduleTimeline() {
       </div>
       <div class="timeline-days">
         ${days.map((day) => `
-          <button class="ghost timeline-day ${state.scheduleScope === 'day' && day === date ? 'active' : ''} ${day === today ? 'today' : ''}" data-action="schedule-select-day" data-date="${day}">
+          <button class="ghost timeline-day ${state.scheduleScope === 'week' || day === date ? 'active' : ''} ${day === today ? 'today' : ''}" data-action="schedule-select-day" data-date="${day}">
             <span>${shortDayLabel(day)}</span>
             <small>${Number(day.slice(8))}${day === today ? ` · ${en ? 'today' : '今'}` : ''}</small>
           </button>
