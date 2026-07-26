@@ -209,7 +209,7 @@ function nowTime() {
 
 function timeInput(name, value, required = true, role = null) {
   const hours = Array.from({ length: 24 }, (_, index) => String(index).padStart(2, '0'));
-  const minutes = Array.from({ length: 12 }, (_, index) => String(index * 5).padStart(2, '0'));
+  const minutes = Array.from({ length: 60 }, (_, index) => String(index).padStart(2, '0'));
   const column = (part, values, label) => `
     <div class="time-col-wrap">
       <div class="time-col-label">${t(label)}</div>
@@ -321,24 +321,62 @@ function setTimeInputPart(input, part, value) {
   const parts = timeParts(input.value);
   parts[part] = value;
   input.value = `${parts.hour}:${parts.minute}`;
-  syncTimePicker(input, { scroll: false });
 }
 
-function syncTimePicker(input, { scroll = true } = {}) {
+// Programmatic scrolls set a suppress flag so the scrollend commit handler
+// ignores them — only user-initiated scrolls may write the input back.
+function scrollColumnToValue(column, value) {
+  const item = column.querySelector(`[data-time-value="${value}"]`);
+  if (!item) return;
+  const top = item.offsetTop - (column.clientHeight - item.offsetHeight) / 2;
+  if (Math.abs(column.scrollTop - top) < 1) return;
+  column.suppressCommit = true;
+  column.scrollTop = top;
+}
+
+function centeredColumnValue(column) {
+  const center = column.scrollTop + column.clientHeight / 2;
+  let best = null;
+  let bestDistance = Infinity;
+  column.querySelectorAll('.time-col-item').forEach((item) => {
+    const distance = Math.abs(center - (item.offsetTop + item.offsetHeight / 2));
+    if (distance < bestDistance) {
+      best = item.dataset.timeValue;
+      bestDistance = distance;
+    }
+  });
+  return best;
+}
+
+// iOS-style depth: items dim and shrink with distance from the center band.
+function updateWheelFalloff(column) {
+  const center = column.scrollTop + column.clientHeight / 2;
+  let best = null;
+  let bestDistance = Infinity;
+  column.querySelectorAll('.time-col-item').forEach((item) => {
+    const distance = Math.abs(center - (item.offsetTop + item.offsetHeight / 2));
+    const steps = distance / item.offsetHeight;
+    item.style.opacity = String(Math.max(0.16, 1 - steps * 0.26));
+    item.style.transform = `scale(${Math.max(0.8, 1 - steps * 0.055)})`;
+    if (distance < bestDistance) {
+      best = item;
+      bestDistance = distance;
+    }
+  });
+  column.querySelectorAll('.time-col-item.centered').forEach((item) => {
+    if (item !== best) item.classList.remove('centered');
+  });
+  if (best) best.classList.add('centered');
+}
+
+function syncTimePicker(input) {
   const wrap = input.closest('[data-time-picker]');
   if (!wrap) return;
   const parts = timeParts(input.value);
   wrap.querySelectorAll('[data-time-part]').forEach((column) => {
     const value = column.dataset.timePart === 'hour' ? parts.hour : parts.minute;
-    let active = null;
-    column.querySelectorAll('.time-col-item').forEach((item) => {
-      const isActive = item.dataset.timeValue === value;
-      item.classList.toggle('active', isActive);
-      if (isActive) active = item;
-    });
-    if (scroll && active) {
-      column.scrollTop = active.offsetTop - (column.clientHeight - active.offsetHeight) / 2;
-    }
+    scrollColumnToValue(column, value);
+    updateWheelFalloff(column);
   });
 }
 
@@ -2021,10 +2059,10 @@ function bindTimeInputEvents() {
         syncTimePicker(input);
       }
     });
-    // Typing is never interfered with: the panel only highlights (no
-    // scrolling, and nothing writes the input back except explicit picks).
+    // Typing is never written back: wheels follow the typed value via
+    // suppressed programmatic scrolls; only user scrolling commits.
     input.addEventListener('input', () => {
-      if (normalizeTimeValue(input.value)) syncTimePicker(input, { scroll: false });
+      if (normalizeTimeValue(input.value)) syncTimePicker(input);
     });
     input.addEventListener('wheel', (event) => {
       if (document.activeElement !== input) return; // don't hijack page scroll
@@ -2057,13 +2095,34 @@ function bindTimeInputEvents() {
   });
   $$('[data-time-picker]').forEach((wrap) => {
     const input = wrap.querySelector('[data-time-input]');
+    wrap.querySelectorAll('[data-time-part]').forEach((column) => {
+      column.addEventListener('scroll', () => {
+        if (column.falloffFrame) return;
+        column.falloffFrame = requestAnimationFrame(() => {
+          column.falloffFrame = null;
+          updateWheelFalloff(column);
+        });
+      });
+      column.addEventListener('scrollend', () => {
+        updateWheelFalloff(column);
+        if (column.suppressCommit) {
+          column.suppressCommit = false;
+          return;
+        }
+        const value = centeredColumnValue(column);
+        if (input && value) setTimeInputPart(input, column.dataset.timePart, value);
+      });
+    });
     wrap.querySelectorAll('.time-col-item').forEach((item) => {
       item.addEventListener('mousedown', (event) => event.preventDefault());
       item.addEventListener('click', () => {
         const column = item.closest('[data-time-part]');
-        if (!input || !column) return;
-        setTimeInputPart(input, column.dataset.timePart, item.dataset.timeValue);
-        if (column.dataset.timePart === 'minute') wrap.classList.remove('open');
+        if (!column) return;
+        // Scroll the tapped value into the center band; the resulting
+        // scrollend commits it through the same path as manual scrolling.
+        const top = item.offsetTop - (column.clientHeight - item.offsetHeight) / 2;
+        if (Math.abs(column.scrollTop - top) < 1) return;
+        column.scrollTo({ top, behavior: 'smooth' });
       });
     });
     wrap.querySelectorAll('.time-quick-chip').forEach((chip) => {
