@@ -36,7 +36,6 @@ const ZH = {
   'Today at a glance': '今日概览', 'Current week': '本周概览', 'Related OKR': '相关 OKR',
   'Daily tasks': '日任务', 'Schedule blocks': '日计划', 'Time records': '时间记录',
   'Add schedule block': '新增日计划', 'Add time record': '新增时间记录', 'Add insight': '新增心得',
-  'Arranged view': '排列视图', 'Timeline view': '时间轴视图',
   'Daily plan document': '计划文档', 'Daily review document': '复盘文档',
   'Weekly task commitments': '周任务', 'Week focus table': '本周记录',
   'Weekly planning document': '周规划', 'Weekly review document': '周复盘',
@@ -155,10 +154,10 @@ let state = {
   collapsedTaskIds: new Set(),
   taskEditorMode: 'edit',
   scheduleScope: 'week',
-  scheduleDayView: 'arranged',
   sidebarCollapsed: localStorage.getItem('sidebarCollapsed') === 'true',
   markdownWorkspace: null,
   markdownSidebarCollapsed: true,
+  sidebarPanel: localStorage.getItem('sidebarPanel') === 'timeline' ? 'timeline' : 'md',
   modal: null,
 };
 
@@ -997,7 +996,79 @@ function setMarkdownWorkspaceEditorValue(value) {
   if (editor) editor.value = value;
 }
 
+function sidebarModeHead() {
+  const en = state.data?.settings?.language === 'en';
+  const mode = state.sidebarPanel === 'timeline' ? 'timeline' : 'md';
+  return `
+    <div class="markdown-workspace-head">
+      <button type="button" class="small ghost markdown-mode-button ${mode === 'md' ? 'active' : ''}" data-action="set-sidebar-panel" data-panel="md">md</button>
+      <button type="button" class="small ghost markdown-mode-button ${mode === 'timeline' ? 'active' : ''}" data-action="set-sidebar-panel" data-panel="timeline">${en ? 'day' : '时间轴'}</button>
+    </div>
+  `;
+}
+
+function renderSidebarTimeline() {
+  const en = state.data?.settings?.language === 'en';
+  const date = activeDate();
+  const today = calendarDateIso(new Date());
+  const schedules = collection('scheduleBlocks').filter((block) => block.date === date).sort((a, b) => `${a.start}`.localeCompare(`${b.start}`));
+  const entries = collection('timeEntries').filter((entry) => entry.date === date).sort((a, b) => `${a.start}`.localeCompare(`${b.start}`));
+  const summary = summarizeDate(date);
+  const range = timelineRange([...schedules, ...entries]);
+  const heading = `
+    <div class="markdown-workspace-innerbar">
+      <div class="markdown-workspace-title">
+        <p>${en ? 'Timeline' : '时间轴'}</p>
+        <h2>${escapeHtml(date)}${date === today ? ` · ${en ? 'today' : '今天'}` : ''}</h2>
+      </div>
+      <div class="markdown-workspace-actions"><span class="badge focus">${en ? 'Focus' : '专注'} ${escapeHtml(formatMinutes(summary.focusMinutes))}</span></div>
+    </div>
+  `;
+  if (!range) {
+    return `${heading}<div class="empty markdown-workspace-empty">${en ? 'No schedule blocks or time records on this day.' : '这一天还没有日计划或时间记录。'}</div>`;
+  }
+  const hourMarks = timelineHourMarks(range);
+  const nowMinutes = timeToMinutes(nowTime());
+  const nowLine = date === today && nowMinutes !== null && nowMinutes >= range.start && nowMinutes <= range.end
+    ? `<div class="timeline-now-line" style="top:${timelinePercent(nowMinutes, range)}%;"><span>${escapeHtml(nowTime())}</span></div>`
+    : '';
+  return `
+    ${heading}
+    <div class="sidebar-timeline">
+      <div class="sidebar-timeline-head">
+        <div></div>
+        <button class="small secondary" data-action="open-schedule-modal">+ ${t('Schedule blocks')}</button>
+        <button class="small secondary" data-action="open-time-entry-modal">+ ${t('Time records')}</button>
+      </div>
+      <div class="day-timeline-body sidebar-timeline-body" style="height:${Math.round((range.end - range.start) * 0.85)}px;">
+        <div class="timeline-axis">
+          ${hourMarks.map((minute) => `<div class="timeline-hour-label" style="top:${timelinePercent(minute, range)}%;">${String(Math.floor((minute % (24 * 60)) / 60)).padStart(2, '0')}:00</div>`).join('')}
+        </div>
+        <div class="timeline-track planned-track">
+          ${hourMarks.map((minute) => `<div class="timeline-hour-line" style="top:${timelinePercent(minute, range)}%;"></div>`).join('')}
+          ${schedules.map((block) => timelineBlock(block, 'scheduleBlocks', 'Schedule block', range)).join('')}
+        </div>
+        <div class="timeline-track actual-track">
+          ${hourMarks.map((minute) => `<div class="timeline-hour-line" style="top:${timelinePercent(minute, range)}%;"></div>`).join('')}
+          ${entries.map((entry) => timelineBlock(entry, 'timeEntries', 'Time record', range)).join('')}
+        </div>
+        ${nowLine}
+      </div>
+    </div>
+  `;
+}
+
 function renderMarkdownWorkspace() {
+  if (state.sidebarPanel === 'timeline') {
+    return `
+      <section class="markdown-workspace">
+        ${sidebarModeHead()}
+        <div class="markdown-workspace-body">
+          ${renderSidebarTimeline()}
+        </div>
+      </section>
+    `;
+  }
   const doc = state.markdownWorkspace;
   const visionDoc = doc?.kind === 'vision'
     ? collection('documents').find((item) => item.id === doc.id)
@@ -1005,9 +1076,7 @@ function renderMarkdownWorkspace() {
   if (!doc) {
     return `
       <section class="markdown-workspace">
-        <div class="markdown-workspace-head">
-          <button type="button" class="small ghost markdown-mode-button">md</button>
-        </div>
+        ${sidebarModeHead()}
         <div class="markdown-workspace-body">
           <div class="markdown-workspace-innerbar">
             <div class="markdown-workspace-title">
@@ -1022,9 +1091,7 @@ function renderMarkdownWorkspace() {
   }
   return `
     <section class="markdown-workspace">
-      <div class="markdown-workspace-head">
-        <button type="button" class="small ghost markdown-mode-button" title="${escapeHtml(markdownWorkspaceTitle(doc))}">md</button>
-      </div>
+      ${sidebarModeHead()}
       <div class="markdown-workspace-body">
         <div class="markdown-workspace-innerbar">
           <div class="markdown-workspace-title">
@@ -1221,14 +1288,7 @@ function renderScheduleDay() {
         <div class="list">${dayTasks.length ? dayTasks.map(dailyTaskRow).join('') : '<div class="empty">No daily tasks. Bind one from the task pool.</div>'}</div>
       </section>
       <section class="card">
-        <div class="view-switch-head">
-          <span class="segmented">
-            <button class="small ghost ${state.scheduleDayView === 'arranged' ? 'active' : ''}" data-action="set-schedule-view" data-view="arranged">${t('Arranged view')}</button>
-            <button class="small ghost ${state.scheduleDayView === 'timeline' ? 'active' : ''}" data-action="set-schedule-view" data-view="timeline">${t('Timeline view')}</button>
-          </span>
-        </div>
-        <div class="hr"></div>
-        ${state.scheduleDayView === 'timeline' ? dayTimelineComparison(schedules, entries) : dayArrangementComparison(schedules, entries)}
+        ${dayArrangementComparison(schedules, entries)}
       </section>
       <section class="card">
         <div class="section-head">
@@ -1469,6 +1529,7 @@ function timelineBlock(item, collectionName, fallbackTitle, range) {
   return `
     <div class="timeline-block ${collectionName === 'timeEntries' ? 'actual' : 'planned'} ${focus ? 'focus' : ''}"
       style="top:${top}%; height:${height}%;"
+      data-action="${collectionName === 'timeEntries' ? 'edit-time-entry' : 'edit-schedule-block'}" data-id="${item.id}"
       title="${escapeHtml(`${item.start}-${item.end} · ${title}`)}">
       <div class="timeline-block-title">${escapeHtml(title)}</div>
       <div class="timeline-block-meta">
@@ -1478,36 +1539,6 @@ function timelineBlock(item, collectionName, fallbackTitle, range) {
         ${item.note ? `<span>${escapeHtml(item.note)}</span>` : ''}
       </div>
       <button class="timeline-delete" data-action="delete" data-collection="${collectionName}" data-id="${item.id}" aria-label="Delete">×</button>
-    </div>
-  `;
-}
-
-function dayTimelineComparison(schedules, entries) {
-  const range = timelineRange([...schedules, ...entries]);
-  if (!range) {
-    return dayArrangementComparison(schedules, entries);
-  }
-  const hourMarks = timelineHourMarks(range);
-  return `
-    <div class="day-timeline">
-      <div class="day-timeline-head">
-        <div>${t('Time')}</div>
-        ${scheduleColumnHead('Schedule blocks', 'open-schedule-modal')}
-        ${scheduleColumnHead('Time records', 'open-time-entry-modal')}
-      </div>
-      <div class="day-timeline-body" style="height:${(range.end - range.start) * 0.9}px;">
-        <div class="timeline-axis">
-          ${hourMarks.map((minute) => `<div class="timeline-hour-label" style="top:${timelinePercent(minute, range)}%;">${String(Math.floor((minute % (24 * 60)) / 60)).padStart(2, '0')}:00</div>`).join('')}
-        </div>
-        <div class="timeline-track planned-track">
-          ${hourMarks.map((minute) => `<div class="timeline-hour-line" style="top:${timelinePercent(minute, range)}%;"></div>`).join('')}
-          ${schedules.map((block) => timelineBlock(block, 'scheduleBlocks', 'Schedule block', range)).join('') || '<div class="empty compact">—</div>'}
-        </div>
-        <div class="timeline-track actual-track">
-          ${hourMarks.map((minute) => `<div class="timeline-hour-line" style="top:${timelinePercent(minute, range)}%;"></div>`).join('')}
-          ${entries.map((entry) => timelineBlock(entry, 'timeEntries', 'Time record', range)).join('') || '<div class="empty compact">—</div>'}
-        </div>
-      </div>
     </div>
   `;
 }
@@ -2390,6 +2421,9 @@ async function handleFormSubmit(event) {
 }
 
 async function handleAction(event) {
+  // Actions can nest (a delete button inside a clickable timeline block);
+  // only the innermost action may run.
+  event.stopPropagation();
   const el = event.currentTarget;
   const action = el.dataset.action;
   await tryAction(async () => {
@@ -2398,8 +2432,10 @@ async function handleAction(event) {
 }
 
 async function runAction(action, el) {
-  if (action === 'set-schedule-view') {
-    state.scheduleDayView = el.dataset.view || 'arranged';
+  if (action === 'set-sidebar-panel') {
+    state.sidebarPanel = el.dataset.panel === 'timeline' ? 'timeline' : 'md';
+    localStorage.setItem('sidebarPanel', state.sidebarPanel);
+    state.markdownSidebarCollapsed = false;
     render();
     return;
   }
@@ -2505,6 +2541,7 @@ async function runAction(action, el) {
     state.selectedDailyDocDate = date;
     state.selectedDailyDocType = type;
     state.markdownWorkspace = { kind: 'daily', date, type };
+    state.sidebarPanel = 'md';
     state.markdownSidebarCollapsed = false;
     state.modal = null;
     render();
@@ -2526,6 +2563,7 @@ async function runAction(action, el) {
     state.selectedCycleDocKey = key;
     state.selectedCycleDocType = type;
     state.markdownWorkspace = { kind: 'cycle', scope, key, type };
+    state.sidebarPanel = 'md';
     state.markdownSidebarCollapsed = false;
     state.modal = null;
     render();
@@ -2800,6 +2838,7 @@ async function runAction(action, el) {
     if (!doc) return;
     state.selectedVisionId = doc.id;
     state.markdownWorkspace = { kind: 'vision', id: doc.id };
+    state.sidebarPanel = 'md';
     state.markdownSidebarCollapsed = false;
     state.modal = null;
     render();
@@ -2811,6 +2850,7 @@ async function runAction(action, el) {
     state.data = await window.iterself.mutate({ type: 'upsert', collection: 'documents', item });
     state.selectedVisionId = item.id;
     state.markdownWorkspace = { kind: 'vision', id: item.id };
+    state.sidebarPanel = 'md';
     state.markdownSidebarCollapsed = false;
     showToast('Saved');
     render();
