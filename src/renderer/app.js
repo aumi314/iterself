@@ -87,7 +87,6 @@ const ZH = {
   'Focus category records': '专注分类记录', 'All recorded': '全部记录', 'Daily bindings': '日任务',
   'Weekly tasks': '周任务', 'Commitments from task pool': '从任务池选择',
   'Set weekly tasks': '设置周任务', 'Set daily tasks': '设置各天日任务',
-  'Select a week or a day from the timeline.': '从时间轴选择一周或某一天。',
   'Capture thoughts, problems, tiny observations. They appear here for review.': '记录想法、问题和观察，复盘时会在这里看到。',
   'Choose tasks from the task pool for this week.': '从任务池中选择本周要做的任务。',
   'Objectives coexist independently. Each objective contains its own key results.': '多个目标可以并存，每个目标维护自己的 KR。',
@@ -446,9 +445,18 @@ function weekNumber(dateString) {
 }
 
 function weekTitle(weekStart) {
-  return state.data?.settings?.language === 'en'
-    ? `Week ${weekNumber(weekStart)}`
-    : `第 ${weekNumber(weekStart)} 周`;
+  const end = addDays(weekStart, 6);
+  if (state.data?.settings?.language === 'en') {
+    return `${weekStart} – ${end} · W${weekNumber(weekStart)}`;
+  }
+  const [startYear, startMonth, startDay] = weekStart.split('-').map(Number);
+  const [endYear, endMonth, endDay] = end.split('-').map(Number);
+  const endLabel = startYear !== endYear
+    ? `${endYear}年${endMonth}月${endDay}日`
+    : startMonth !== endMonth
+      ? `${endMonth}月${endDay}日`
+      : `${endDay}日`;
+  return `${startYear}年${startMonth}月${startDay}日 – ${endLabel} · 第${weekNumber(weekStart)}周`;
 }
 
 function addMonths(monthKey, offset) {
@@ -476,8 +484,8 @@ function monthLabel(monthKey) {
 function shortDayLabel(dateString) {
   const date = new Date(`${dateString}T00:00:00`);
   return state.data?.settings?.language === 'en'
-    ? date.toLocaleDateString('en-US', { weekday: 'long' })
-    : date.toLocaleDateString('zh-CN', { weekday: 'long' });
+    ? date.toLocaleDateString('en-US', { weekday: 'short' })
+    : date.toLocaleDateString('zh-CN', { weekday: 'short' });
 }
 
 function escapeHtml(value) {
@@ -1107,11 +1115,7 @@ function statCard(label, value, hint) {
 }
 
 function renderSchedule() {
-  const detail = state.scheduleScope === 'week'
-    ? renderScheduleWeek()
-    : state.scheduleScope === 'day'
-      ? renderScheduleDay()
-      : '';
+  const detail = state.scheduleScope === 'day' ? renderScheduleDay() : renderScheduleWeek();
   return `
     <div class="grid">
       ${scheduleTimeline()}
@@ -1123,20 +1127,30 @@ function renderSchedule() {
 function scheduleTimeline() {
   const weekStart = activeWeekStart();
   const date = activeDate();
+  const today = calendarDateIso(new Date());
   const days = weekDates(weekStart);
+  const en = state.data?.settings?.language === 'en';
   return `
     <section class="card schedule-timeline">
-      <div class="timeline-row">
-        <button class="small ghost" data-action="schedule-prev-week">←</button>
-        <button class="ghost timeline-week ${state.scheduleScope === 'week' ? 'active' : ''}" data-action="schedule-select-week">${weekTitle(weekStart)}</button>
-        <button class="small ghost" data-action="schedule-next-week">→</button>
-      </div>
-      <div class="timeline-row days">
-        <button class="small ghost" data-action="schedule-prev-day">←</button>
-        <div class="timeline-days">
-          ${days.map((day) => `<button class="ghost timeline-day ${state.scheduleScope === 'day' && day === date ? 'active' : ''}" data-action="schedule-select-day" data-date="${day}"><span>${shortDayLabel(day)}</span><small>${day}</small></button>`).join('')}
+      <div class="timeline-bar">
+        <div class="timeline-nav">
+          <button class="small ghost" data-action="schedule-prev" aria-label="${en ? 'Previous' : '上一个'}">←</button>
+          <button class="small ghost" data-action="schedule-today">${en ? 'Today' : '今天'}</button>
+          <button class="small ghost" data-action="schedule-next" aria-label="${en ? 'Next' : '下一个'}">→</button>
         </div>
-        <button class="small ghost" data-action="schedule-next-day">→</button>
+        <div class="timeline-title">${escapeHtml(weekTitle(weekStart))}</div>
+        <div class="timeline-scope">
+          <button class="scope-chip ${state.scheduleScope === 'week' ? 'active' : ''}" data-action="schedule-set-scope" data-scope="week">${en ? 'Week' : '周'}</button>
+          <button class="scope-chip ${state.scheduleScope === 'day' ? 'active' : ''}" data-action="schedule-set-scope" data-scope="day">${en ? 'Day' : '日'}</button>
+        </div>
+      </div>
+      <div class="timeline-days">
+        ${days.map((day) => `
+          <button class="ghost timeline-day ${state.scheduleScope === 'day' && day === date ? 'active' : ''} ${day === today ? 'today' : ''}" data-action="schedule-select-day" data-date="${day}">
+            <span>${shortDayLabel(day)}</span>
+            <small>${Number(day.slice(8))}${day === today ? ` · ${en ? 'today' : '今'}` : ''}</small>
+          </button>
+        `).join('')}
       </div>
     </section>
   `;
@@ -2531,8 +2545,8 @@ async function runAction(action, el) {
     return;
   }
 
-  if (action === 'schedule-select-week') {
-    state.scheduleScope = state.scheduleScope === 'week' ? null : 'week';
+  if (action === 'schedule-set-scope') {
+    state.scheduleScope = el.dataset.scope === 'day' ? 'day' : 'week';
     state.modal = null;
     render();
     return;
@@ -2540,12 +2554,6 @@ async function runAction(action, el) {
 
   if (action === 'schedule-select-day') {
     const date = el.dataset.date;
-    if (state.scheduleScope === 'day' && activeDate() === date) {
-      state.scheduleScope = null;
-      state.modal = null;
-      render();
-      return;
-    }
     state.scheduleScope = 'day';
     state.modal = null;
     state.data = await window.iterself.mutate({ type: 'setMeta', patch: { activeDate: date, activeWeekStart: startOfWeekIso(date) } });
@@ -2553,18 +2561,20 @@ async function runAction(action, el) {
     return;
   }
 
-  if (action === 'schedule-prev-week' || action === 'schedule-next-week') {
-    const nextWeek = addDays(activeWeekStart(), action === 'schedule-prev-week' ? -7 : 7);
-    if (state.scheduleScope !== null) state.scheduleScope = 'week';
+  if (action === 'schedule-today') {
+    const today = calendarDateIso(new Date());
     state.modal = null;
-    state.data = await window.iterself.mutate({ type: 'setMeta', patch: { activeWeekStart: nextWeek, activeDate: nextWeek } });
+    state.data = await window.iterself.mutate({ type: 'setMeta', patch: { activeDate: today, activeWeekStart: startOfWeekIso(today) } });
     render();
     return;
   }
 
-  if (action === 'schedule-prev-day' || action === 'schedule-next-day') {
-    const nextDate = addDays(activeDate(), action === 'schedule-prev-day' ? -1 : 1);
-    if (state.scheduleScope !== null) state.scheduleScope = 'day';
+  // Arrows step by the visible unit — a week in week view, a day in day
+  // view — and never change which view is active.
+  if (action === 'schedule-prev' || action === 'schedule-next') {
+    const direction = action === 'schedule-prev' ? -1 : 1;
+    const step = state.scheduleScope === 'day' ? 1 : 7;
+    const nextDate = addDays(activeDate(), direction * step);
     state.modal = null;
     state.data = await window.iterself.mutate({ type: 'setMeta', patch: { activeDate: nextDate, activeWeekStart: startOfWeekIso(nextDate) } });
     render();
