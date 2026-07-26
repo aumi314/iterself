@@ -242,16 +242,23 @@ async function createStore(userDataDir) {
     }
   }
 
-  async function renameWithRetry(from, to) {
+  async function replaceFile(from, to) {
     for (let attempt = 0; ; attempt += 1) {
       try {
         return await fs.rename(from, to);
       } catch (error) {
+        // Some Windows setups report EXDEV even for same-directory renames
+        // (filter drivers / redirected profile dirs; build-win.js works around
+        // the same machine trait for electron-builder). Copy+delete is not
+        // atomic, but .bak + quarantine recovery still cover a torn copy.
+        if (error.code === 'EXDEV') break;
         // Antivirus/indexers on Windows can hold the target briefly.
         if (attempt >= 2 || !['EPERM', 'EACCES', 'EBUSY'].includes(error.code)) throw error;
         await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
       }
     }
+    await fs.copyFile(from, to);
+    await fs.rm(from, { force: true });
   }
 
   async function refreshBak() {
@@ -318,7 +325,7 @@ async function createStore(userDataDir) {
     const json = JSON.stringify(next, null, 2);
     await fs.writeFile(tmpPath, json, 'utf8');
     await refreshBak();
-    await renameWithRetry(tmpPath, dataPath);
+    await replaceFile(tmpPath, dataPath);
     await refreshAutoBackup(json);
     return next;
   }
