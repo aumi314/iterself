@@ -163,6 +163,7 @@ let state = {
   timelineSelection: null,
   timelineBlockSelection: null,
   taskPickerScope: null,
+  taskPickerDate: null,
   taskPickerQuery: '',
   modal: null,
 };
@@ -1429,7 +1430,9 @@ function renderModal() {
       body: cycleDocModalBody(cycleDoc, state.selectedCycleDocScope, state.selectedCycleDocType),
     } : null,
     'task-picker': state.taskPickerScope ? {
-      title: state.taskPickerScope === 'week' ? 'Pick weekly tasks' : 'Pick daily tasks',
+      title: state.taskPickerScope === 'week'
+        ? 'Pick weekly tasks'
+        : `${state.taskPickerDate || activeDate()} · ${t('Pick daily tasks')}`,
       body: taskPickerBody(state.taskPickerScope),
     } : null,
   }[state.modal];
@@ -1499,9 +1502,10 @@ function confirmDeleteTaskBody(task) {
 function taskPickerBody(scope) {
   const en = state.data?.settings?.language === 'en';
   const query = state.taskPickerQuery || '';
+  const pickerDate = state.taskPickerDate || activeDate();
   const boundIds = new Set(scope === 'week'
     ? collection('weeklyTaskBindings').filter((binding) => binding.weekStart === activeWeekStart()).map((binding) => binding.taskId)
-    : collection('dailyTaskBindings').filter((binding) => binding.date === activeDate()).map((binding) => binding.taskId));
+    : collection('dailyTaskBindings').filter((binding) => binding.date === pickerDate).map((binding) => binding.taskId));
   const rows = treeItems(collection('tasks')).map(({ item, depth }) => {
     const bound = boundIds.has(item.id);
     const searchText = getTaskPath(item.id).toLowerCase();
@@ -1535,8 +1539,10 @@ function weekDailyOverview(weekStart) {
         const insights = summary.insights.slice().sort((a, b) => `${a.timestamp}`.localeCompare(`${b.timestamp}`));
         return `
           <div class="row week-day-overview">
-            <div class="row-title">${shortDayLabel(day)} · ${day}</div>
-            ${dailyTaskForm(day)}
+            <div class="row-header">
+              <div class="row-title">${shortDayLabel(day)} · ${day}</div>
+              <div class="row-actions"><button class="small ghost" data-action="open-task-picker" data-scope="day" data-date="${day}">+ ${t('Daily tasks')}</button></div>
+            </div>
             <div class="week-day-columns">
               <div>
                 <h4>Daily tasks</h4>
@@ -2807,6 +2813,7 @@ async function handleAction(event) {
 async function runAction(action, el) {
   if (action === 'open-task-picker') {
     state.taskPickerScope = el.dataset.scope === 'week' ? 'week' : 'day';
+    state.taskPickerDate = el.dataset.date || activeDate();
     state.taskPickerQuery = '';
     state.modal = 'task-picker';
     render();
@@ -2823,9 +2830,10 @@ async function runAction(action, el) {
       if (existing) await mutate({ type: 'delete', collection: 'weeklyTaskBindings', id: existing.id }, 'Deleted');
       else await mutate({ type: 'upsert', collection: 'weeklyTaskBindings', item: { id: uid('wt'), weekStart: activeWeekStart(), taskId } }, 'Saved');
     } else {
-      const existing = collection('dailyTaskBindings').find((binding) => binding.date === activeDate() && binding.taskId === taskId);
+      const pickerDate = state.taskPickerDate || activeDate();
+      const existing = collection('dailyTaskBindings').find((binding) => binding.date === pickerDate && binding.taskId === taskId);
       if (existing) await mutate({ type: 'delete', collection: 'dailyTaskBindings', id: existing.id }, 'Deleted');
-      else await mutate({ type: 'upsert', collection: 'dailyTaskBindings', item: { id: uid('dt'), date: activeDate(), taskId } }, 'Saved');
+      else await mutate({ type: 'upsert', collection: 'dailyTaskBindings', item: { id: uid('dt'), date: pickerDate, taskId } }, 'Saved');
     }
     return;
   }
