@@ -158,7 +158,7 @@ let state = {
   markdownWorkspace: null,
   markdownSidebarCollapsed: true,
   sidebarPanel: localStorage.getItem('sidebarPanel') === 'timeline' ? 'timeline' : 'md',
-  timelineView: { start: 0, end: 24 * 60 },
+  timelineView: null,
   modal: null,
 };
 
@@ -1502,10 +1502,26 @@ function scheduleColumnHead(label, action) {
   `;
 }
 
+// The timeline always shows the viewport window, never implicitly the
+// whole day: the window persists across launches, and a fresh profile
+// starts with 6 hours centred on now. Full-day is an explicit choice
+// (double-click the scrubber).
 function timelineViewRange() {
-  const view = state.timelineView;
-  if (!view || !(view.end > view.start)) return { start: 0, end: 24 * 60 };
-  return view;
+  if (!state.timelineView) {
+    let saved = null;
+    try {
+      saved = JSON.parse(localStorage.getItem('timelineView') || 'null');
+    } catch (error) {
+      saved = null;
+    }
+    if (saved && Number.isFinite(saved.start) && Number.isFinite(saved.end) && saved.end > saved.start) {
+      setTimelineView(saved.start, saved.end);
+    } else {
+      const now = timeToMinutes(nowTime()) ?? 12 * 60;
+      setTimelineView(now - 180, now + 180);
+    }
+  }
+  return state.timelineView;
 }
 
 function setTimelineView(start, end) {
@@ -1514,6 +1530,7 @@ function setTimelineView(start, end) {
   if (next < 0) next = 0;
   if (next + size > 24 * 60) next = 24 * 60 - size;
   state.timelineView = { start: next, end: next + size };
+  localStorage.setItem('timelineView', JSON.stringify(state.timelineView));
 }
 
 // Denser hour marks as the viewport zooms in.
@@ -2146,7 +2163,7 @@ function bindTimelineViewEvents() {
 
   if (!scrubber) return;
   scrubber.addEventListener('dblclick', () => {
-    state.timelineView = { start: 0, end: 24 * 60 };
+    setTimelineView(0, 24 * 60);
     render();
   });
   scrubber.addEventListener('pointerdown', (event) => {
