@@ -902,8 +902,8 @@ function renderNav() {
   $$('#nav button').forEach((button) => {
     button.addEventListener('click', () => {
       state.page = button.dataset.page;
-      state.markdownWorkspace = null;
-      state.markdownSidebarCollapsed = true;
+      // The right sidebar is an independent panel: switching pages must not
+      // collapse it, change its mode, or close an open document.
       state.modal = null;
       render();
     });
