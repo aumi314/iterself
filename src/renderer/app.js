@@ -160,6 +160,7 @@ let state = {
   sidebarPanel: localStorage.getItem('sidebarPanel') === 'timeline' ? 'timeline' : 'md',
   timelineView: null,
   timelineSelection: null,
+  timelineBlockSelection: null,
   modal: null,
 };
 
@@ -168,6 +169,9 @@ const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 
 let timelineDragActive = false;
 let timelinePointerY = null;
+// Uncommitted start/end while a block handle is being dragged; the store
+// is written once on release, not per frame.
+let timelineBlockDraft = null;
 
 // Re-renders rebuild the guide element hidden; this restores it at the
 // remembered cursor position (wheel navigation re-renders without any
@@ -1609,28 +1613,40 @@ function timelinePercent(minute, range) {
 }
 
 function timelineBlock(item, collectionName, fallbackTitle, range) {
-  const start = timeToMinutes(item.start);
-  const duration = minutesBetween(item.start, item.end);
+  const armed = Boolean(state.timelineBlockSelection
+    && state.timelineBlockSelection.collection === collectionName
+    && state.timelineBlockSelection.id === item.id);
+  const draft = armed && timelineBlockDraft ? timelineBlockDraft : null;
+  const start = draft ? draft.start : timeToMinutes(item.start);
+  const duration = draft ? draft.end - draft.start : minutesBetween(item.start, item.end);
   if (start === null || duration <= 0) return '';
+  const startLabel = draft ? minutesToTimeValue(draft.start) : item.start;
+  const endLabel = draft ? minutesToTimeValue(draft.end) : item.end;
   const taskTitle = item.taskId ? getTaskPath(item.taskId) : '';
   const title = item.title || taskTitle || fallbackTitle;
   const focus = collectionName === 'timeEntries' && isFocusCategory(item.categoryId);
   const categoryTitle = collectionName === 'timeEntries' ? getCategoryPath(item.categoryId) : '';
   const top = timelinePercent(start, range);
   const height = (duration / (range.end - range.start)) * 100;
+  const editAction = collectionName === 'timeEntries' ? 'edit-time-entry' : 'edit-schedule-block';
   return `
-    <div class="timeline-block ${collectionName === 'timeEntries' ? 'actual' : 'planned'} ${focus ? 'focus' : ''}"
+    <div class="timeline-block ${collectionName === 'timeEntries' ? 'actual' : 'planned'} ${focus ? 'focus' : ''} ${armed ? 'armed' : ''}"
       style="top:${top}%; height:${height}%;"
-      data-action="${collectionName === 'timeEntries' ? 'edit-time-entry' : 'edit-schedule-block'}" data-id="${item.id}"
-      title="${escapeHtml(`${item.start}-${item.end} · ${title}`)}">
+      data-action="select-timeline-block" data-id="${item.id}" data-collection="${collectionName}"
+      title="${escapeHtml(`${startLabel}-${endLabel} · ${title}`)}">
       <div class="timeline-block-title">${escapeHtml(title)}</div>
       <div class="timeline-block-meta">
-        <span>${escapeHtml(`${item.start}-${item.end}`)}</span>
+        <span>${escapeHtml(`${startLabel}-${endLabel}`)}</span>
         <span>${formatMinutes(duration)}</span>
         ${categoryTitle ? `<span>${escapeHtml(categoryTitle)}</span>` : ''}
         ${item.note ? `<span>${escapeHtml(item.note)}</span>` : ''}
       </div>
       <button class="timeline-delete" data-action="delete" data-collection="${collectionName}" data-id="${item.id}" aria-label="Delete">×</button>
+      ${armed ? `
+        <div class="block-handle top" data-block-handle="start"></div>
+        <button class="block-edit" data-action="${editAction}" data-id="${item.id}" aria-label="Edit">✎</button>
+        <div class="block-handle bottom" data-block-handle="end"></div>
+      ` : ''}
     </div>
   `;
 }
@@ -2311,6 +2327,7 @@ function bindTimelineViewEvents() {
         moved = true;
         const current = clampMinutes(minuteAt(moveEvent.clientY));
         const start = Math.min(anchor, current);
+        state.timelineBlockSelection = null;
         state.timelineSelection = {
           date: activeDate(),
           lane,
@@ -2323,8 +2340,9 @@ function bindTimelineViewEvents() {
         timelineDragActive = false;
         document.removeEventListener('pointermove', onMove);
         document.removeEventListener('pointerup', onUp);
-        if (!moved && state.timelineSelection) {
+        if (!moved && (state.timelineSelection || state.timelineBlockSelection)) {
           state.timelineSelection = null;
+          state.timelineBlockSelection = null;
           render();
         }
       };
@@ -2355,6 +2373,54 @@ function bindTimelineViewEvents() {
         timelineDragActive = false;
         document.removeEventListener('pointermove', onMove);
         document.removeEventListener('pointerup', onUp);
+      };
+      document.addEventListener('pointermove', onMove);
+      document.addEventListener('pointerup', onUp);
+    });
+  });
+
+  container.querySelectorAll('[data-block-handle]').forEach((handle) => {
+    handle.addEventListener('pointerdown', (event) => {
+      const armed = state.timelineBlockSelection;
+      if (!armed) return;
+      const item = collection(armed.collection).find((entry) => entry.id === armed.id);
+      if (!item) return;
+      const baseStart = timeToMinutes(item.start);
+      const baseEnd = baseStart === null ? null : baseStart + minutesBetween(item.start, item.end);
+      // Midnight-crossing blocks keep modal-only editing; dragging their
+      // edges on a single-day axis has no sane meaning.
+      if (baseStart === null || baseEnd === null || baseEnd > 24 * 60) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const edge = handle.dataset.blockHandle;
+      const minuteAt = minuteAtFactory();
+      timelineDragActive = true;
+      timelineBlockDraft = { start: baseStart, end: baseEnd };
+      const onMove = (moveEvent) => {
+        const minute = clampMinutes(minuteAt(moveEvent.clientY));
+        if (edge === 'start') {
+          timelineBlockDraft = { start: Math.min(minute, baseEnd - 1), end: baseEnd };
+        } else {
+          timelineBlockDraft = { start: baseStart, end: Math.max(minute, baseStart + 1) };
+        }
+        scheduleDragRender();
+      };
+      const onUp = async () => {
+        timelineDragActive = false;
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', onUp);
+        const draft = timelineBlockDraft;
+        timelineBlockDraft = null;
+        if (draft && (draft.start !== baseStart || draft.end !== baseEnd)) {
+          await tryAction(() => mutate({
+            type: 'patch',
+            collection: armed.collection,
+            id: armed.id,
+            patch: { start: minutesToTimeValue(draft.start), end: minutesToTimeValue(draft.end) },
+          }, 'Saved'));
+        } else {
+          render();
+        }
       };
       document.addEventListener('pointermove', onMove);
       document.addEventListener('pointerup', onUp);
@@ -2648,6 +2714,7 @@ async function handleFormSubmit(event) {
     }
     state.selectedScheduleBlockId = null;
     state.timelineSelection = null;
+    state.timelineBlockSelection = null;
     state.modal = null;
     render();
     return;
@@ -2672,6 +2739,7 @@ async function handleFormSubmit(event) {
     state.selectedTimeEntryId = null;
     state.timer = null;
     state.timelineSelection = null;
+    state.timelineBlockSelection = null;
     state.modal = null;
     render();
     return;
@@ -2707,6 +2775,13 @@ async function handleAction(event) {
 }
 
 async function runAction(action, el) {
+  if (action === 'select-timeline-block') {
+    state.timelineBlockSelection = { collection: el.dataset.collection, id: el.dataset.id };
+    state.timelineSelection = null;
+    render();
+    return;
+  }
+
   if (action === 'create-from-selection') {
     const selection = state.timelineSelection;
     if (!selection) return;
@@ -3014,6 +3089,9 @@ async function runAction(action, el) {
     if (el.dataset.collection === 'documents' && state.markdownWorkspace?.kind === 'vision' && el.dataset.id === state.markdownWorkspace.id) {
       state.markdownWorkspace = null;
       state.markdownSidebarCollapsed = true;
+    }
+    if (state.timelineBlockSelection && el.dataset.id === state.timelineBlockSelection.id) {
+      state.timelineBlockSelection = null;
     }
     await mutate({ type: 'delete', collection: el.dataset.collection, id: el.dataset.id }, 'Deleted');
     return;
