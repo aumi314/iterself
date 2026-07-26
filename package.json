@@ -1,6 +1,6 @@
 {
   "name": "iterself",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Local-first personal iteration desktop app for planning, recording, reviewing, and exporting life/work cycles.",
   "main": "src/main/main.js",
   "type": "commonjs",
