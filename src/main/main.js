@@ -13,6 +13,18 @@ let store;
 // Windows and log noisy "Unable to move the cache" / GPU cache errors.
 app.setPath('sessionData', path.join(app.getPath('userData'), 'session-data'));
 
+// Two instances share one data file and would overwrite each other's writes
+// (dev runs and the packaged app share userData too). Second launch focuses
+// the existing window instead.
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) app.quit();
+
+app.on('second-instance', () => {
+  if (!mainWindow) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.focus();
+});
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1320,
@@ -34,6 +46,7 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  if (!gotSingleInstanceLock) return;
   store = await createStore(app.getPath('userData'));
   createWindow();
 
