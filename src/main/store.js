@@ -213,6 +213,22 @@ function ensureArrays(data) {
   data.weeklyPlans = [];
   data.monthlyPlans = [];
   data.visionDocuments = [];
+
+  // v1 wrote Sunday-based week starts; under the Monday-start convention
+  // those weeks can never be displayed. Shift Sunday keys forward one day.
+  // A week doc stays put if the corrected slot is already taken — moving
+  // must never overwrite existing content.
+  const mondayWeekStart = (value) => {
+    if (!value) return value;
+    const date = new Date(`${value}T00:00:00`);
+    return date.getDay() === 0 ? addDays(value, 1) : value;
+  };
+  data.documents.forEach((doc) => {
+    if (doc.scope !== 'week') return;
+    const fixed = mondayWeekStart(doc.key);
+    if (fixed !== doc.key && !documentExists('week', fixed, doc.type)) doc.key = fixed;
+  });
+
   data.documents = data.documents.map((entry) => ({
     id: entry.id,
     scope: entry.scope,
@@ -226,7 +242,7 @@ function ensureArrays(data) {
 
   data.weeklyTaskBindings = data.weeklyTaskBindings.map((entry) => ({
     id: entry.id,
-    weekStart: entry.weekStart,
+    weekStart: mondayWeekStart(entry.weekStart),
     taskId: entry.taskId,
     createdAt: entry.createdAt,
     updatedAt: entry.updatedAt,

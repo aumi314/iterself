@@ -176,6 +176,20 @@ async function testDocumentUnification() {
     await store.mutate({ type: 'upsert', collection: 'documents', item: { scope: 'vision', key: null, type: 'free', title: 'A', content: 'a' } });
     next = await store.mutate({ type: 'upsert', collection: 'documents', item: { scope: 'vision', key: null, type: 'free', title: 'B', content: 'b' } });
     assert.ok(next.documents.filter((doc) => doc.scope === 'vision').length >= 3, 'vision documents coexist as a pool');
+
+    // v1 Sunday week starts heal to Monday; occupied slots are never overwritten.
+    const sunday = JSON.parse(JSON.stringify(next));
+    sunday.weeklyTaskBindings = [{ id: 'wb1', weekStart: '2026-07-05', taskId: sunday.tasks[0].id, createdAt: '2026-07-05T00:00:00.000Z', updatedAt: '2026-07-05T00:00:00.000Z' }];
+    sunday.documents = sunday.documents.filter((doc) => doc.scope !== 'week').concat([
+      { id: 'wsun_plan', scope: 'week', key: '2026-07-05', type: 'plan', title: '', content: 'sunday plan', createdAt: '2026-07-05T00:00:00.000Z', updatedAt: '2026-07-05T00:00:00.000Z' },
+      { id: 'wmon_plan', scope: 'week', key: '2026-07-06', type: 'plan', title: '', content: 'monday plan', createdAt: '2026-07-06T00:00:00.000Z', updatedAt: '2026-07-06T00:00:00.000Z' },
+      { id: 'wsun_rev', scope: 'week', key: '2026-07-05', type: 'review', title: '', content: 'sunday review', createdAt: '2026-07-05T00:00:00.000Z', updatedAt: '2026-07-05T00:00:00.000Z' },
+    ]);
+    const healed = await store.replace(sunday);
+    assert.equal(healed.weeklyTaskBindings[0].weekStart, '2026-07-06', 'sunday binding heals to monday');
+    assert.equal(healed.documents.find((doc) => doc.id === 'wsun_plan').key, '2026-07-05', 'occupied slot: doc stays put rather than overwrite');
+    assert.equal(healed.documents.find((doc) => doc.id === 'wmon_plan').content, 'monday plan', 'existing monday doc untouched');
+    assert.equal(healed.documents.find((doc) => doc.id === 'wsun_rev').key, '2026-07-06', 'free slot: sunday review moves to monday');
   });
 }
 
