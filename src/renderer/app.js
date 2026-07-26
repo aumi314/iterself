@@ -2247,7 +2247,7 @@ function bindTimelineViewEvents() {
   });
 
   const guide = container.querySelector('[data-timeline-guide]');
-  const snapMinutes = (minutes) => Math.max(0, Math.min(24 * 60, Math.round(minutes / 5) * 5));
+  const clampMinutes = (minutes) => Math.max(0, Math.min(24 * 60, Math.round(minutes)));
   // Geometry is cached at drag start: re-renders replace the viewport
   // element mid-drag, so live lookups would go stale.
   const minuteAtFactory = () => {
@@ -2256,11 +2256,21 @@ function bindTimelineViewEvents() {
     return (clientY) => view.start
       + Math.min(1, Math.max(0, (clientY - rect.top) / rect.height)) * (view.end - view.start);
   };
+  // Coalesce drag re-renders to one per animation frame.
+  let renderQueued = false;
+  const scheduleDragRender = () => {
+    if (renderQueued) return;
+    renderQueued = true;
+    requestAnimationFrame(() => {
+      renderQueued = false;
+      render();
+    });
+  };
 
   viewport.addEventListener('mousemove', (event) => {
     if (!guide || timelineDragActive) return;
     const view = timelineViewRange();
-    const minute = snapMinutes(minuteAtFactory()(event.clientY));
+    const minute = clampMinutes(minuteAtFactory()(event.clientY));
     guide.hidden = false;
     guide.style.top = `${timelinePercent(minute, view)}%`;
     guide.querySelector('span').textContent = minutesToTimeValue(minute);
@@ -2276,22 +2286,23 @@ function bindTimelineViewEvents() {
       if (event.target.closest('.timeline-block') || event.target.closest('.timeline-selection')) return;
       event.preventDefault();
       const minuteAt = minuteAtFactory();
-      const anchor = snapMinutes(minuteAt(event.clientY));
+      const anchor = clampMinutes(minuteAt(event.clientY));
+      const startClientY = event.clientY;
       let moved = false;
       timelineDragActive = true;
       if (guide) guide.hidden = true;
       const onMove = (moveEvent) => {
-        const current = snapMinutes(minuteAt(moveEvent.clientY));
-        if (!moved && Math.abs(current - anchor) < 5) return;
+        if (!moved && Math.abs(moveEvent.clientY - startClientY) < 4) return;
         moved = true;
+        const current = clampMinutes(minuteAt(moveEvent.clientY));
         const start = Math.min(anchor, current);
         state.timelineSelection = {
           date: activeDate(),
           lane,
           start,
-          end: Math.max(start + 5, Math.max(anchor, current)),
+          end: Math.max(start + 1, Math.max(anchor, current)),
         };
-        render();
+        scheduleDragRender();
       };
       const onUp = () => {
         timelineDragActive = false;
@@ -2317,13 +2328,13 @@ function bindTimelineViewEvents() {
       const minuteAt = minuteAtFactory();
       timelineDragActive = true;
       const onMove = (moveEvent) => {
-        const minute = snapMinutes(minuteAt(moveEvent.clientY));
+        const minute = clampMinutes(minuteAt(moveEvent.clientY));
         if (edge === 'start') {
-          state.timelineSelection = { ...baseSelection, start: Math.min(minute, baseSelection.end - 5) };
+          state.timelineSelection = { ...baseSelection, start: Math.min(minute, baseSelection.end - 1) };
         } else {
-          state.timelineSelection = { ...baseSelection, end: Math.max(minute, baseSelection.start + 5) };
+          state.timelineSelection = { ...baseSelection, end: Math.max(minute, baseSelection.start + 1) };
         }
-        render();
+        scheduleDragRender();
       };
       const onUp = () => {
         timelineDragActive = false;
