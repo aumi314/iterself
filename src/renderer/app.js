@@ -207,7 +207,7 @@ function nowTime() {
   return new Date().toTimeString().slice(0, 5);
 }
 
-function timeInput(name, value, required = true, role = null) {
+function timeInput(name, value, required = true) {
   const hours = Array.from({ length: 24 }, (_, index) => String(index).padStart(2, '0'));
   const minutes = Array.from({ length: 60 }, (_, index) => String(index).padStart(2, '0'));
   const column = (part, values, label) => `
@@ -218,14 +218,12 @@ function timeInput(name, value, required = true, role = null) {
       </div>
     </div>
   `;
-  const offsets = role === 'end' ? [15, 30, 60, 90] : [];
   return `
     <div class="time-input-wrap" data-time-picker>
       <input name="${name}" type="text" inputmode="numeric" autocomplete="off" class="time-input" data-time-input value="${escapeHtml(value)}" placeholder="HH:MM" pattern="^([01]?\\d|2[0-3]):[0-5]\\d$" ${required ? 'required' : ''} />
       <div class="time-picker" aria-label="Time picker">
         <div class="time-quick">
           <button type="button" class="time-quick-chip" data-time-set="now">${t('Now')}</button>
-          ${offsets.map((step) => `<button type="button" class="time-quick-chip" data-time-offset="${step}">+${step}m</button>`).join('')}
         </div>
         <div class="time-columns">
           ${column('hour', hours, 'Hour')}
@@ -1505,8 +1503,8 @@ function scheduleForm(date, block = null) {
   return `
     <form data-form="schedule" data-mode="${mode}" data-id="${escapeHtml(block?.id || '')}" class="form-grid four">
       <input type="hidden" name="date" value="${escapeHtml(block?.date || date)}" />
-      <label>Start${timeInput('start', block?.start || '09:00', true, 'start')}</label>
-      <label>End${timeInput('end', block?.end || '10:00', true, 'end')}</label>
+      <label>Start${timeInput('start', block?.start || '09:00')}</label>
+      <label>End${timeInput('end', block?.end || '10:00')}</label>
       <label class="span2">Bound task<select name="taskId">${optionList(taskOptions(), block?.taskId || '')}</select></label>
       <label class="span4">Note<input name="note" value="${escapeHtml(block?.note || '')}" placeholder="Optional note" /></label>
       <div class="span4"><button type="submit">${block ? '保存日计划' : 'Add block'}</button></div>
@@ -1525,8 +1523,8 @@ function timeEntryForm(date, entry = null) {
     </div>`}
     <form data-form="time-entry" data-mode="${mode}" data-id="${escapeHtml(entry?.id || '')}" class="form-grid four">
       <input type="hidden" name="date" value="${escapeHtml(entry?.date || date)}" />
-      <label>Start${timeInput('start', timerStart, true, 'start')}</label>
-      <label>End${timeInput('end', entry?.end || nowTime(), true, 'end')}</label>
+      <label>Start${timeInput('start', timerStart)}</label>
+      <label>End${timeInput('end', entry?.end || nowTime())}</label>
       <label>Name<input name="title" value="${escapeHtml(entry?.title || '')}" placeholder="Optional free title" /></label>
       <label>Bound task<select name="taskId">${optionList(taskOptions(), entry?.taskId || '')}</select></label>
       <label class="span4">Note<input name="note" value="${escapeHtml(entry?.note || '')}" placeholder="What objectively happened?" /></label>
@@ -2129,13 +2127,7 @@ function bindTimeInputEvents() {
       chip.addEventListener('mousedown', (event) => event.preventDefault());
       chip.addEventListener('click', () => {
         if (!input) return;
-        if (chip.dataset.timeOffset) {
-          const startInput = wrap.closest('form')?.querySelector('[name="start"]');
-          const base = normalizeTimeValue(startInput?.value) || nowTime();
-          input.value = addMinutesToTime(base, Number(chip.dataset.timeOffset));
-        } else {
-          input.value = nowTime();
-        }
+        input.value = nowTime();
         syncTimePicker(input);
         wrap.classList.remove('open');
       });
