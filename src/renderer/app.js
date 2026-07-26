@@ -1811,29 +1811,16 @@ function renderMonth() {
 function monthTimeline(monthKey) {
   const en = state.data?.settings?.language === 'en';
   const thisMonth = calendarDateIso(new Date()).slice(0, 7);
-  const months = [-2, -1, 0, 1, 2, 3].map((offset) => addMonths(monthKey, offset));
-  const chipLabel = (item) => {
-    const dateObj = new Date(`${item}-01T00:00:00`);
-    return en ? dateObj.toLocaleDateString('en-US', { month: 'short' }) : `${dateObj.getMonth() + 1}月`;
-  };
   return `
     <section class="card schedule-timeline">
       <div class="timeline-bar">
         <button class="small ghost" data-action="month-today">${en ? 'This month' : '本月'}</button>
         <div class="timeline-center">
           <button class="small ghost" data-action="month-prev" aria-label="${en ? 'Previous month' : '上一月'}">←</button>
-          <div class="timeline-title timeline-title-month">${escapeHtml(monthLabel(monthKey))}</div>
+          <div class="timeline-title timeline-title-month">${escapeHtml(monthLabel(monthKey))}${monthKey === thisMonth ? ` · ${en ? 'now' : '今'}` : ''}</div>
           <button class="small ghost" data-action="month-next" aria-label="${en ? 'Next month' : '下一月'}">→</button>
         </div>
         <div></div>
-      </div>
-      <div class="month-strip">
-        ${months.map((item) => `
-          <button class="month-chip ${item === monthKey ? 'active' : ''} ${item === thisMonth ? 'today' : ''}" data-action="month-select" data-month="${item}">
-            <strong>${escapeHtml(chipLabel(item))}</strong>
-            <small>${item.slice(0, 4)}${item === thisMonth ? ` · ${en ? 'now' : '今'}` : ''}</small>
-          </button>
-        `).join('')}
       </div>
     </section>
   `;
@@ -2928,14 +2915,6 @@ async function runAction(action, el) {
     const today = calendarDateIso(new Date());
     state.modal = null;
     state.data = await window.iterself.mutate({ type: 'setMeta', patch: { activeDate: today, activeWeekStart: startOfWeekIso(today) } });
-    render();
-    return;
-  }
-
-  if (action === 'month-select') {
-    const nextDate = monthDate(el.dataset.month);
-    state.modal = null;
-    state.data = await window.iterself.mutate({ type: 'setMeta', patch: { activeDate: nextDate, activeWeekStart: startOfWeekIso(nextDate) } });
     render();
     return;
   }
