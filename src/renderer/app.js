@@ -37,7 +37,7 @@ const ZH = {
   'Daily tasks': '日任务', 'Schedule blocks': '日计划', 'Time records': '时间记录',
   'Add schedule block': '新增日计划', 'Add time record': '新增时间记录', 'Add insight': '新增心得',
   'Arranged view': '排列视图', 'Timeline view': '时间轴视图',
-  'Daily plan document': '日计划', 'Daily review document': '日复盘',
+  'Daily plan document': '计划文档', 'Daily review document': '复盘文档',
   'Weekly task commitments': '周任务', 'Week focus table': '本周记录',
   'Weekly planning document': '周规划', 'Weekly review document': '周复盘',
   'Monthly planning document': '月规划', 'Monthly review document': '月复盘',
@@ -92,7 +92,7 @@ const ZH = {
   'Choose tasks from the task pool for this week.': '从任务池中选择本周要做的任务。',
   'Objectives coexist independently. Each objective contains its own key results.': '多个目标可以并存，每个目标维护自己的 KR。',
   'No objectives yet.': '暂无目标。', 'No related objectives.': '本月没有相关目标。',
-  'Inventory is not commitment. Weekly and daily plans bind from this pool.': '任务池只是库存，进入周计划或日计划后才算承诺。',
+  'Inventory is not commitment. Weekly and daily plans bind from this pool.': '任务池只是库存，绑定为周任务或日任务后才算承诺。',
   'Select one item on the left, then edit the fields here.': '在左侧选择一项，然后在这里编辑字段。',
   'New root task': '新建根任务',
   'Edit task': '编辑任务', 'Drag tasks to reorder or change hierarchy.': '拖拽任务可调整顺序或上下级。',
@@ -668,25 +668,6 @@ function objectivesForRange(start, end) {
   return collection('objectives').filter((objective) => objective.startDate <= end && objective.endDate >= start);
 }
 
-function activeMonthPlan() {
-  const { monthKey } = monthBounds();
-  return collection('monthlyPlans').find((item) => item.month === monthKey);
-}
-
-function activeDayPlan() {
-  const date = activeDate();
-  return collection('dailyPlans').find((item) => item.date === date) || {
-    date,
-    planDoc: state.data.templates?.dayPlan || '',
-    reviewDoc: state.data.templates?.dayReview || '',
-  };
-}
-
-function activeWeeklyPlan() {
-  const weekStart = activeWeekStart();
-  return collection('weeklyPlans').find((item) => item.weekStart === weekStart);
-}
-
 async function mutate(mutation, message = 'Saved') {
   state.data = await window.iterself.mutate(mutation);
   showToast(message);
@@ -726,30 +707,53 @@ function summarizeDate(date) {
   return { entries, focusMinutes, totalMinutes, dailyTasks, completed, insights };
 }
 
+function findDocument(scope, key, type) {
+  return collection('documents').find((doc) => doc.scope === scope && doc.key === key && doc.type === type);
+}
+
+function docTemplate(scope, type) {
+  const templates = state.data.templates || {};
+  if (scope === 'day') {
+    return (type === 'review' ? templates.dayReview : templates.dayPlan)
+      || (type === 'review' ? '# Daily Review\n\n' : '# Daily Plan\n\n');
+  }
+  if (scope === 'month') {
+    return (type === 'review' ? templates.monthReview : templates.monthPlan)
+      || (type === 'review' ? '# Monthly Review\n\n' : '# Monthly OKR Plan\n\n');
+  }
+  return (type === 'review' ? templates.weekReview : templates.weekPlan)
+    || (type === 'review' ? '# Weekly Review\n\n' : '# Weekly Plan\n\n');
+}
+
+async function saveDocument(scope, key, type, content, message) {
+  const existing = findDocument(scope, key, type);
+  await mutate({
+    type: 'upsert',
+    collection: 'documents',
+    item: { ...(existing || { title: '' }), scope, key, type, content },
+  }, message);
+}
+
 function dailyDocState(date) {
-  const plan = collection('dailyPlans').find((item) => item.date === date);
   return {
-    hasPlan: Boolean(plan?.planDocCreated || plan?.planDoc?.trim()),
-    hasReview: Boolean(plan?.reviewDocCreated || plan?.reviewDoc?.trim()),
+    hasPlan: Boolean(findDocument('day', date, 'plan')),
+    hasReview: Boolean(findDocument('day', date, 'review')),
   };
 }
 
 function dailyDocTemplate(type) {
-  if (type === 'review') return state.data.templates?.dayReview || '# Daily Review\n\n';
-  return state.data.templates?.dayPlan || '# Daily Plan\n\n';
+  return docTemplate('day', type);
 }
 
 function dailyDocValue(date, type, fallbackToTemplate = false) {
-  const plan = collection('dailyPlans').find((item) => item.date === date);
-  const field = type === 'review' ? 'reviewDoc' : 'planDoc';
-  const value = plan?.[field] || '';
+  const value = findDocument('day', date, type)?.content || '';
   return value || (fallbackToTemplate ? dailyDocTemplate(type) : '');
 }
 
 function dailyDocPreview(date, type) {
   const value = dailyDocValue(date, type, false);
   const exists = type === 'review' ? dailyDocState(date).hasReview : dailyDocState(date).hasPlan;
-  const title = type === 'review' ? 'Daily review Markdown' : 'Daily plan Markdown';
+  const title = type === 'review' ? 'Daily review document' : 'Daily plan document';
   return `
     <div class="doc-preview-card">
       <div class="section-head">
@@ -767,48 +771,24 @@ function dailyDocPreview(date, type) {
   `;
 }
 
-function cycleDocCollection(scope) {
-  return scope === 'month' ? 'monthlyPlans' : 'weeklyPlans';
-}
-
-function cycleDocExisting(scope, key) {
-  if (scope === 'month') return collection('monthlyPlans').find((item) => item.month === key);
-  return collection('weeklyPlans').find((item) => item.weekStart === key);
-}
-
-function cycleDocBase(scope, key) {
-  if (scope === 'month') return { id: `month:${key}`, month: key, planDoc: '', reviewDoc: '' };
-  return { id: uid('week'), weekStart: key, planDoc: '', reviewDoc: '', createdAt: new Date().toISOString() };
-}
-
 function cycleDocState(scope, key) {
-  const plan = cycleDocExisting(scope, key);
   return {
-    hasPlan: Boolean(plan?.planDocCreated || plan?.planDoc?.trim()),
-    hasReview: Boolean(plan?.reviewDocCreated || plan?.reviewDoc?.trim()),
+    hasPlan: Boolean(findDocument(scope, key, 'plan')),
+    hasReview: Boolean(findDocument(scope, key, 'review')),
   };
 }
 
 function cycleDocTemplate(scope, type) {
-  if (scope === 'month') {
-    return type === 'review'
-      ? state.data.templates?.monthReview || '# Monthly Review\n\n'
-      : state.data.templates?.monthPlan || '# Monthly OKR Plan\n\n';
-  }
-  return type === 'review'
-    ? state.data.templates?.weekReview || '# Weekly Review\n\n'
-    : state.data.templates?.weekPlan || '# Weekly Plan\n\n';
+  return docTemplate(scope, type);
 }
 
 function cycleDocValue(scope, key, type) {
-  const plan = cycleDocExisting(scope, key);
-  const field = type === 'review' ? 'reviewDoc' : 'planDoc';
-  return plan?.[field] || '';
+  return findDocument(scope, key, type)?.content || '';
 }
 
 function cycleDocTitle(scope, type) {
-  if (scope === 'month') return type === 'review' ? 'Monthly review Markdown' : 'Monthly planning Markdown';
-  return type === 'review' ? 'Weekly review Markdown' : 'Weekly planning Markdown';
+  if (scope === 'month') return type === 'review' ? 'Monthly review document' : 'Monthly planning document';
+  return type === 'review' ? 'Weekly review document' : 'Weekly planning document';
 }
 
 function cycleDocSavedMessage(scope) {
@@ -849,7 +829,7 @@ function visionDocPreview(doc) {
           <p class="card-subtitle">更新于 ${displayDateTime(doc.updatedAt || doc.createdAt)}</p>
         </div>
         <div class="toolbar">
-          <button class="small danger" data-action="delete" data-collection="visionDocuments" data-id="${doc.id}">删除</button>
+          <button class="small danger" data-action="delete" data-collection="documents" data-id="${doc.id}">删除</button>
           <button class="small ghost" data-action="open-vision-doc" data-id="${doc.id}">打开</button>
         </div>
       </div>
@@ -976,7 +956,7 @@ function setMarkdownWorkspaceEditorValue(value) {
 function renderMarkdownWorkspace() {
   const doc = state.markdownWorkspace;
   const visionDoc = doc?.kind === 'vision'
-    ? collection('visionDocuments').find((item) => item.id === doc.id)
+    ? collection('documents').find((item) => item.id === doc.id)
     : null;
   if (!doc) {
     return `
@@ -1023,33 +1003,32 @@ function renderMarkdownWorkspace() {
 function markdownWorkspaceTitle(doc) {
   if (!doc) return '';
   if (doc.kind === 'daily') {
-    return `${doc.date} ${doc.type === 'review' ? '日复盘' : '日规划'}`;
+    return `${doc.date} ${doc.type === 'review' ? '复盘文档' : '计划文档'}`;
   }
   if (doc.kind === 'vision') {
-    const vision = collection('visionDocuments').find((item) => item.id === doc.id);
+    const vision = collection('documents').find((item) => item.id === doc.id);
     return docDisplayTitle(vision);
   }
-  return `${doc.key} ${cycleDocTitle(doc.scope, doc.type)}`;
+  return `${doc.key} ${t(cycleDocTitle(doc.scope, doc.type))}`;
 }
 
 function markdownWorkspaceValue(doc) {
   if (!doc) return '';
   if (doc.kind === 'daily') {
-    const plan = collection('dailyPlans').find((item) => item.date === doc.date);
-    return plan?.[doc.type === 'review' ? 'reviewDoc' : 'planDoc'] || '';
+    return findDocument('day', doc.date, doc.type)?.content || '';
   }
   if (doc.kind === 'vision') {
-    return collection('visionDocuments').find((item) => item.id === doc.id)?.content || '';
+    return collection('documents').find((item) => item.id === doc.id)?.content || '';
   }
-  const plan = cycleDocExisting(doc.scope, doc.key);
-  return plan?.[doc.type === 'review' ? 'reviewDoc' : 'planDoc'] || '';
+  return findDocument(doc.scope, doc.key, doc.type)?.content || '';
 }
 
 function renderDashboard() {
   const day = summarizeDate(activeDate());
   const week = summarizeWeek(activeWeekStart());
   const relatedObjectives = objectivesForRange(activeDate(), activeDate());
-  const weekPlan = activeWeeklyPlan();
+  const weekDocs = cycleDocState('week', activeWeekStart());
+  const weekPlan = weekDocs.hasPlan || weekDocs.hasReview;
   const currentEntries = day.entries.slice().sort((a, b) => `${a.start}`.localeCompare(`${b.start}`));
 
   return `
@@ -1227,9 +1206,11 @@ function renderModal() {
   const confirmTask = collection('tasks').find((item) => item.id === state.confirmDeleteTaskId);
   const selectedScheduleBlock = collection('scheduleBlocks').find((item) => item.id === state.selectedScheduleBlockId);
   const selectedTimeEntry = collection('timeEntries').find((item) => item.id === state.selectedTimeEntryId);
-  const dailyDocPlan = collection('dailyPlans').find((item) => item.date === state.selectedDailyDocDate);
-  const cycleDocPlan = state.selectedCycleDocScope && state.selectedCycleDocKey
-    ? cycleDocExisting(state.selectedCycleDocScope, state.selectedCycleDocKey)
+  const dailyDoc = state.selectedDailyDocDate
+    ? findDocument('day', state.selectedDailyDocDate, state.selectedDailyDocType)
+    : null;
+  const cycleDoc = state.selectedCycleDocScope && state.selectedCycleDocKey
+    ? findDocument(state.selectedCycleDocScope, state.selectedCycleDocKey, state.selectedCycleDocType)
     : null;
   const modalContent = {
     schedule: {
@@ -1258,12 +1239,12 @@ function renderModal() {
       body: confirmDeleteTaskBody(confirmTask),
     } : null,
     'daily-doc': state.selectedDailyDocDate ? {
-      title: `${state.selectedDailyDocDate} ${state.selectedDailyDocType === 'review' ? '日复盘' : '日规划'}`,
-      body: dailyDocModalBody(dailyDocPlan, state.selectedDailyDocType),
+      title: `${state.selectedDailyDocDate} ${state.selectedDailyDocType === 'review' ? '复盘文档' : '计划文档'}`,
+      body: dailyDocModalBody(dailyDoc, state.selectedDailyDocType),
     } : null,
     'cycle-doc': state.selectedCycleDocScope && state.selectedCycleDocKey ? {
-      title: `${state.selectedCycleDocKey} ${cycleDocTitle(state.selectedCycleDocScope, state.selectedCycleDocType)}`,
-      body: cycleDocModalBody(cycleDocPlan, state.selectedCycleDocScope, state.selectedCycleDocType),
+      title: `${state.selectedCycleDocKey} ${t(cycleDocTitle(state.selectedCycleDocScope, state.selectedCycleDocType))}`,
+      body: cycleDocModalBody(cycleDoc, state.selectedCycleDocScope, state.selectedCycleDocType),
     } : null,
   }[state.modal];
   if (!modalContent) return '';
@@ -1281,8 +1262,8 @@ function renderModal() {
   `;
 }
 
-function dailyDocModalBody(plan, type) {
-  const value = plan?.[type === 'review' ? 'reviewDoc' : 'planDoc'] || '';
+function dailyDocModalBody(doc, type) {
+  const value = doc?.content || '';
   return `
     <div class="form-grid">
       <label class="span2">Markdown<textarea id="dailyDocModalContent" class="doc-editor" data-format="markdown">${escapeHtml(value)}</textarea></label>
@@ -1294,8 +1275,8 @@ function dailyDocModalBody(plan, type) {
   `;
 }
 
-function cycleDocModalBody(plan, scope, type) {
-  const value = plan?.[type === 'review' ? 'reviewDoc' : 'planDoc'] || '';
+function cycleDocModalBody(doc, scope, type) {
+  const value = doc?.content || '';
   return `
     <div class="form-grid">
       <label class="span2">Markdown<textarea id="cycleDocModalContent" class="doc-editor" data-format="markdown">${escapeHtml(value)}</textarea></label>
@@ -1939,7 +1920,7 @@ function categoryRow(category, depth) {
 }
 
 function renderVision() {
-  const docs = collection('visionDocuments');
+  const docs = collection('documents').filter((doc) => doc.scope === 'vision');
   return `
     <section class="card vision-page">
       <div class="row-header">
@@ -2307,7 +2288,7 @@ async function handleFormSubmit(event) {
     'weekly-task': () => ({ collection: 'weeklyTaskBindings', item: { id: uid('wt'), weekStart: activeWeekStart(), taskId: values.taskId } }),
     task: () => ({ collection: 'tasks', item: { id: uid('task'), parentId: values.parentId || null, title: values.title, type: values.type, status: values.status, estimatedMinutes: Number(values.estimatedMinutes || 0), note: values.note || '' } }),
     category: () => ({ collection: 'eventCategories', item: { id: uid('cat'), parentId: values.parentId || null, name: values.name, focus: values.focus === 'true', color: values.color || '#2f6f5e' } }),
-    vision: () => ({ collection: 'visionDocuments', item: { id: uid('vision'), title: values.title, content: values.content } }),
+    vision: () => ({ collection: 'documents', item: { id: uid('doc'), scope: 'vision', key: null, type: 'free', title: values.title, content: values.content } }),
   };
 
   const payload = payloads[type]?.();
@@ -2425,15 +2406,12 @@ async function runAction(action, el) {
   if (action === 'open-daily-doc') {
     const date = el.dataset.date;
     const type = el.dataset.docType;
-    const existing = collection('dailyPlans').find((item) => item.date === date);
-    const docs = dailyDocState(date);
-    const exists = type === 'review' ? docs.hasReview : docs.hasPlan;
-    if (!exists) {
-      const item = {
-        ...(existing || { date, planDoc: '', reviewDoc: '' }),
-        ...(type === 'review' ? { reviewDocCreated: true } : { planDocCreated: true }),
-      };
-      state.data = await window.iterself.mutate({ type: 'upsert', collection: 'dailyPlans', item });
+    if (!findDocument('day', date, type)) {
+      state.data = await window.iterself.mutate({
+        type: 'upsert',
+        collection: 'documents',
+        item: { scope: 'day', key: date, type, title: '', content: '' },
+      });
     }
     state.selectedDailyDocDate = date;
     state.selectedDailyDocType = type;
@@ -2448,16 +2426,12 @@ async function runAction(action, el) {
     const scope = el.dataset.scope;
     const key = el.dataset.key;
     const type = el.dataset.docType;
-    const existing = cycleDocExisting(scope, key);
-    const docs = cycleDocState(scope, key);
-    const exists = type === 'review' ? docs.hasReview : docs.hasPlan;
-    if (!exists) {
-      const item = {
-        ...(existing || cycleDocBase(scope, key)),
-        updatedAt: new Date().toISOString(),
-        ...(type === 'review' ? { reviewDocCreated: true } : { planDocCreated: true }),
-      };
-      state.data = await window.iterself.mutate({ type: 'upsert', collection: cycleDocCollection(scope), item });
+    if (!findDocument(scope, key, type)) {
+      state.data = await window.iterself.mutate({
+        type: 'upsert',
+        collection: 'documents',
+        item: { scope, key, type, title: '', content: '' },
+      });
     }
     state.selectedCycleDocScope = scope;
     state.selectedCycleDocKey = key;
@@ -2630,23 +2604,14 @@ async function runAction(action, el) {
     if (el.dataset.collection === 'tasks' && el.dataset.id === state.newTaskParentId) {
       state.newTaskParentId = null;
     }
-    if (el.dataset.collection === 'visionDocuments' && el.dataset.id === state.selectedVisionId) {
+    if (el.dataset.collection === 'documents' && el.dataset.id === state.selectedVisionId) {
       state.selectedVisionId = null;
     }
-    if (el.dataset.collection === 'visionDocuments' && state.markdownWorkspace?.kind === 'vision' && el.dataset.id === state.markdownWorkspace.id) {
+    if (el.dataset.collection === 'documents' && state.markdownWorkspace?.kind === 'vision' && el.dataset.id === state.markdownWorkspace.id) {
       state.markdownWorkspace = null;
       state.markdownSidebarCollapsed = true;
     }
     await mutate({ type: 'delete', collection: el.dataset.collection, id: el.dataset.id }, 'Deleted');
-    return;
-  }
-
-  if (action === 'save-day-plan' || action === 'save-day-review') {
-    const plan = activeDayPlan();
-    const patch = action === 'save-day-plan'
-      ? { planDoc: $('#dayPlanDoc').value, planDocCreated: true }
-      : { reviewDoc: $('#dayReviewDoc').value, reviewDocCreated: true };
-    await mutate({ type: 'upsert', collection: 'dailyPlans', item: { ...plan, ...patch } }, 'Daily document saved');
     return;
   }
 
@@ -2678,53 +2643,27 @@ async function runAction(action, el) {
   }
 
   if (action === 'delete-daily-doc') {
-    const date = el.dataset.date;
-    const type = el.dataset.docType;
-    const existing = collection('dailyPlans').find((item) => item.date === date);
+    const existing = findDocument('day', el.dataset.date, el.dataset.docType);
     if (!existing) return;
-    const next = {
-      ...existing,
-      ...(type === 'review' ? { reviewDoc: '', reviewDocCreated: false } : { planDoc: '', planDocCreated: false }),
-    };
-    if (!next.planDocCreated && !next.reviewDocCreated && !next.planDoc?.trim() && !next.reviewDoc?.trim()) {
-      await mutate({ type: 'delete', collection: 'dailyPlans', id: date }, 'Deleted');
-      return;
-    }
-    await mutate({ type: 'upsert', collection: 'dailyPlans', item: next }, 'Deleted');
+    await mutate({ type: 'delete', collection: 'documents', id: existing.id }, 'Deleted');
     return;
   }
 
   if (action === 'delete-cycle-doc') {
-    const scope = el.dataset.scope;
-    const key = el.dataset.key;
-    const type = el.dataset.docType;
-    const existing = cycleDocExisting(scope, key);
+    const existing = findDocument(el.dataset.scope, el.dataset.key, el.dataset.docType);
     if (!existing) return;
-    const next = {
-      ...existing,
-      updatedAt: new Date().toISOString(),
-      ...(type === 'review' ? { reviewDoc: '', reviewDocCreated: false } : { planDoc: '', planDocCreated: false }),
-    };
-    if (!next.planDocCreated && !next.reviewDocCreated && !next.planDoc?.trim() && !next.reviewDoc?.trim()) {
-      await mutate({ type: 'delete', collection: cycleDocCollection(scope), id: existing.id }, 'Deleted');
-      return;
-    }
-    await mutate({ type: 'upsert', collection: cycleDocCollection(scope), item: next }, 'Deleted');
+    await mutate({ type: 'delete', collection: 'documents', id: existing.id }, 'Deleted');
     return;
   }
 
   if (action === 'save-daily-doc-modal') {
     const date = state.selectedDailyDocDate;
     const type = state.selectedDailyDocType;
-    const existing = collection('dailyPlans').find((item) => item.date === date);
-    const item = existing || { date, planDoc: '', reviewDoc: '' };
-    const patch = type === 'review'
-      ? { reviewDoc: $('#dailyDocModalContent').value, reviewDocCreated: true }
-      : { planDoc: $('#dailyDocModalContent').value, planDocCreated: true };
+    const content = $('#dailyDocModalContent').value;
     state.selectedDailyDocDate = null;
     state.selectedDailyDocType = null;
     state.modal = null;
-    await mutate({ type: 'upsert', collection: 'dailyPlans', item: { ...item, ...patch } }, 'Daily document saved');
+    await saveDocument('day', date, type, content, 'Daily document saved');
     return;
   }
 
@@ -2732,20 +2671,12 @@ async function runAction(action, el) {
     const scope = state.selectedCycleDocScope;
     const key = state.selectedCycleDocKey;
     const type = state.selectedCycleDocType;
-    const existing = cycleDocExisting(scope, key);
-    const item = existing || cycleDocBase(scope, key);
-    const patch = type === 'review'
-      ? { reviewDoc: $('#cycleDocModalContent').value, reviewDocCreated: true }
-      : { planDoc: $('#cycleDocModalContent').value, planDocCreated: true };
+    const content = $('#cycleDocModalContent').value;
     state.selectedCycleDocScope = null;
     state.selectedCycleDocKey = null;
     state.selectedCycleDocType = null;
     state.modal = null;
-    await mutate({
-      type: 'upsert',
-      collection: cycleDocCollection(scope),
-      item: { ...item, ...patch, updatedAt: new Date().toISOString() },
-    }, cycleDocSavedMessage(scope));
+    await saveDocument(scope, key, type, content, cycleDocSavedMessage(scope));
     return;
   }
 
@@ -2754,64 +2685,24 @@ async function runAction(action, el) {
     if (!doc) return;
     const value = markdownWorkspaceEditorValue();
     if (doc.kind === 'daily') {
-      const existing = collection('dailyPlans').find((item) => item.date === doc.date);
-      const item = existing || { date: doc.date, planDoc: '', reviewDoc: '' };
-      const patch = doc.type === 'review'
-        ? { reviewDoc: value, reviewDocCreated: true }
-        : { planDoc: value, planDocCreated: true };
-      await mutate({ type: 'upsert', collection: 'dailyPlans', item: { ...item, ...patch } }, 'Daily document saved');
+      await saveDocument('day', doc.date, doc.type, value, 'Daily document saved');
       return;
     }
     if (doc.kind === 'vision') {
-      const existing = collection('visionDocuments').find((item) => item.id === doc.id);
+      const existing = collection('documents').find((item) => item.id === doc.id);
       if (!existing) return;
       await mutate({
         type: 'patch',
-        collection: 'visionDocuments',
+        collection: 'documents',
         id: doc.id,
         patch: {
           title: $('#markdownWorkspaceTitleInput')?.value || '',
           content: value,
-          updatedAt: new Date().toISOString(),
         },
       }, 'Vision saved');
       return;
     }
-    const existing = cycleDocExisting(doc.scope, doc.key);
-    const item = existing || cycleDocBase(doc.scope, doc.key);
-    const patch = doc.type === 'review'
-      ? { reviewDoc: value, reviewDocCreated: true }
-      : { planDoc: value, planDocCreated: true };
-    await mutate({
-      type: 'upsert',
-      collection: cycleDocCollection(doc.scope),
-      item: { ...item, ...patch, updatedAt: new Date().toISOString() },
-    }, cycleDocSavedMessage(doc.scope));
-    return;
-  }
-
-  if (action === 'save-week-plan' || action === 'save-week-review') {
-    const weekStart = activeWeekStart();
-    const plan = activeWeeklyPlan() || cycleDocBase('week', weekStart);
-    const patch = action === 'save-week-plan'
-      ? { planDoc: $('#weekPlanDoc')?.value || '', planDocCreated: true }
-      : { reviewDoc: $('#weekReviewDoc')?.value || '', reviewDocCreated: true };
-    await mutate({ type: 'upsert', collection: 'weeklyPlans', item: { ...plan, ...patch, updatedAt: new Date().toISOString() } }, 'Weekly document saved');
-    return;
-  }
-
-  if (action === 'save-month-plan' || action === 'save-month-review') {
-    const monthKey = el.dataset.month || monthBounds().monthKey;
-    const plan = cycleDocExisting('month', monthKey) || cycleDocBase('month', monthKey);
-    const item = {
-      ...plan,
-      month: monthKey,
-      updatedAt: new Date().toISOString(),
-      planDoc: action === 'save-month-plan' ? ($('#monthPlanDoc')?.value || '') : plan.planDoc,
-      reviewDoc: action === 'save-month-review' ? ($('#monthReviewDoc')?.value || '') : plan.reviewDoc,
-      ...(action === 'save-month-plan' ? { planDocCreated: true } : { reviewDocCreated: true }),
-    };
-    await mutate({ type: 'upsert', collection: 'monthlyPlans', item }, 'Monthly document saved');
+    await saveDocument(doc.scope, doc.key, doc.type, value, cycleDocSavedMessage(doc.scope));
     return;
   }
 
@@ -2822,7 +2713,7 @@ async function runAction(action, el) {
   }
 
   if (action === 'open-vision-doc') {
-    const doc = collection('visionDocuments').find((item) => item.id === el.dataset.id);
+    const doc = collection('documents').find((item) => item.id === el.dataset.id);
     if (!doc) return;
     state.selectedVisionId = doc.id;
     state.markdownWorkspace = { kind: 'vision', id: doc.id };
@@ -2833,8 +2724,8 @@ async function runAction(action, el) {
   }
 
   if (action === 'new-vision') {
-    const item = { id: uid('vision'), title: '', content: '', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-    state.data = await window.iterself.mutate({ type: 'upsert', collection: 'visionDocuments', item });
+    const item = { id: uid('doc'), scope: 'vision', key: null, type: 'free', title: '', content: '', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    state.data = await window.iterself.mutate({ type: 'upsert', collection: 'documents', item });
     state.selectedVisionId = item.id;
     state.markdownWorkspace = { kind: 'vision', id: item.id };
     state.markdownSidebarCollapsed = false;
