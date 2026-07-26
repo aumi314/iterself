@@ -506,9 +506,47 @@ label {
 .sidebar-timeline {
   min-height: 0;
   display: grid;
-  grid-template-rows: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 14px;
+  gap: 8px;
   overflow: hidden;
   padding: 12px 14px 16px;
+}
+
+.timeline-scrubber {
+  position: relative;
+  border-radius: 7px;
+  background: var(--row);
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.scrubber-mark {
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.scrubber-mark.planned {
+  background: var(--accent);
+  opacity: 0.85;
+}
+
+.scrubber-mark.actual {
+  background: var(--warn);
+  opacity: 0.85;
+}
+
+.scrubber-thumb {
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  min-height: 10px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: rgba(127, 127, 127, 0.25);
+  cursor: grab;
 }
 
 .sidebar-timeline-body {

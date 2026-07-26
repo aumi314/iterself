@@ -158,6 +158,7 @@ let state = {
   markdownWorkspace: null,
   markdownSidebarCollapsed: true,
   sidebarPanel: localStorage.getItem('sidebarPanel') === 'timeline' ? 'timeline' : 'md',
+  timelineView: { start: 0, end: 24 * 60 },
   modal: null,
 };
 
@@ -959,7 +960,10 @@ function render() {
     settings: renderSettings,
   };
   destroyMarkdownWorkspaceEditor();
-  $('#content').innerHTML = `${renderers[state.page]()}${markdownSidebarActive ? renderMarkdownWorkspace() : ''}${renderModal()}`;
+  const content = $('#content');
+  const previousScrollTop = content.scrollTop;
+  content.innerHTML = `${renderers[state.page]()}${markdownSidebarActive ? renderMarkdownWorkspace() : ''}${renderModal()}`;
+  content.scrollTop = previousScrollTop;
   translateRenderedUi();
   bindPageEvents();
   mountMarkdownWorkspaceEditor();
@@ -1014,9 +1018,11 @@ function renderSidebarTimeline() {
   const schedules = collection('scheduleBlocks').filter((block) => block.date === date).sort((a, b) => `${a.start}`.localeCompare(`${b.start}`));
   const entries = collection('timeEntries').filter((entry) => entry.date === date).sort((a, b) => `${a.start}`.localeCompare(`${b.start}`));
   const summary = summarizeDate(date);
-  // The panel's job is the shape of the whole day: a fixed 00:00–24:00
-  // axis filling the sidebar, not a window fitted to the data.
-  const range = { start: 0, end: 24 * 60 };
+  // A viewport onto the day (ManicTime-style): defaults to the full
+  // 00:00–24:00, zoomable with Shift+wheel and pannable with Ctrl+wheel;
+  // the scrubber on the right shows and controls the window.
+  const range = timelineViewRange();
+  const size = range.end - range.start;
   const heading = `
     <div class="markdown-workspace-innerbar">
       <div class="markdown-workspace-title">
@@ -1026,21 +1032,27 @@ function renderSidebarTimeline() {
       <div class="markdown-workspace-actions"><span class="badge focus">${en ? 'Focus' : '专注'} ${escapeHtml(formatMinutes(summary.focusMinutes))}</span></div>
     </div>
   `;
-  const hourMarks = timelineHourMarks(range, 120);
+  const hourMarks = timelineHourMarks(range, timelineViewStep(size));
   const nowMinutes = timeToMinutes(nowTime());
-  const showNow = date === today && nowMinutes !== null;
+  const showNow = date === today && nowMinutes !== null && nowMinutes >= range.start && nowMinutes <= range.end;
   const nowLine = showNow
     ? `<div class="timeline-now-line" style="top:${timelinePercent(nowMinutes, range)}%;"><span>${escapeHtml(nowTime())}</span></div>`
     : '';
   // An hour label sitting under the now-line label is unreadable — the
   // dashed line stays, only the colliding text yields.
-  const axisMarks = hourMarks.filter((minute) => !(showNow && Math.abs(minute - nowMinutes) < 35));
+  const axisMarks = hourMarks.filter((minute) => !(showNow && Math.abs(minute - nowMinutes) < size / 40));
+  const scrubberMark = (item, cls) => {
+    const start = timeToMinutes(item.start);
+    const duration = minutesBetween(item.start, item.end);
+    if (start === null || duration <= 0) return '';
+    return `<div class="scrubber-mark ${cls}" style="top:${(start / (24 * 60)) * 100}%;height:${Math.max(0.6, (duration / (24 * 60)) * 100)}%;"></div>`;
+  };
   return `
     ${heading}
     <div class="sidebar-timeline">
-      <div class="day-timeline-body sidebar-timeline-body">
+      <div class="day-timeline-body sidebar-timeline-body" data-timeline-viewport>
         <div class="timeline-axis">
-          ${axisMarks.map((minute) => `<div class="timeline-hour-label" style="top:${timelinePercent(minute, range)}%;">${minute === 24 * 60 ? '24:00' : `${String(Math.floor(minute / 60)).padStart(2, '0')}:00`}</div>`).join('')}
+          ${axisMarks.map((minute) => `<div class="timeline-hour-label" style="top:${timelinePercent(minute, range)}%;">${timelineAxisLabel(minute)}</div>`).join('')}
         </div>
         <div class="timeline-track planned-track">
           ${hourMarks.map((minute) => `<div class="timeline-hour-line" style="top:${timelinePercent(minute, range)}%;"></div>`).join('')}
@@ -1051,6 +1063,11 @@ function renderSidebarTimeline() {
           ${entries.map((entry) => timelineBlock(entry, 'timeEntries', 'Time record', range)).join('')}
         </div>
         ${nowLine}
+      </div>
+      <div class="timeline-scrubber" data-timeline-scrubber title="${en ? 'Drag to move the window · double-click to reset' : '拖动移动窗口 · 双击复位全天'}">
+        ${schedules.map((block) => scrubberMark(block, 'planned')).join('')}
+        ${entries.map((entry) => scrubberMark(entry, 'actual')).join('')}
+        <div class="scrubber-thumb" data-scrubber-thumb style="top:${(range.start / (24 * 60)) * 100}%;height:${(size / (24 * 60)) * 100}%;"></div>
       </div>
     </div>
   `;
@@ -1483,6 +1500,33 @@ function scheduleColumnHead(label, action) {
       <button class="small secondary" data-action="${action}">+ ${t(label)}</button>
     </div>
   `;
+}
+
+function timelineViewRange() {
+  const view = state.timelineView;
+  if (!view || !(view.end > view.start)) return { start: 0, end: 24 * 60 };
+  return view;
+}
+
+function setTimelineView(start, end) {
+  const size = Math.min(24 * 60, Math.max(60, Math.round(end - start)));
+  let next = Math.round(start);
+  if (next < 0) next = 0;
+  if (next + size > 24 * 60) next = 24 * 60 - size;
+  state.timelineView = { start: next, end: next + size };
+}
+
+// Denser hour marks as the viewport zooms in.
+function timelineViewStep(size) {
+  if (size >= 960) return 120;
+  if (size >= 480) return 60;
+  if (size >= 180) return 30;
+  return 15;
+}
+
+function timelineAxisLabel(minute) {
+  if (minute === 24 * 60) return '24:00';
+  return `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`;
 }
 
 function timelineHourMarks(range, stepMinutes = 60) {
@@ -2067,8 +2111,72 @@ function bindPageEvents() {
     element.addEventListener('click', handleAction);
   });
   bindTimeInputEvents();
+  bindTimelineViewEvents();
   bindTaskSelectionEvents();
   bindTaskDragEvents();
+}
+
+function bindTimelineViewEvents() {
+  const container = $('.sidebar-timeline');
+  if (!container) return;
+  const viewport = container.querySelector('[data-timeline-viewport]');
+  const scrubber = container.querySelector('[data-timeline-scrubber]');
+
+  container.addEventListener('wheel', (event) => {
+    if (!event.shiftKey && !event.ctrlKey) return;
+    event.preventDefault();
+    // Chromium reports Shift+vertical-wheel as deltaX.
+    const delta = event.deltaY !== 0 ? event.deltaY : event.deltaX;
+    if (delta === 0) return;
+    const view = timelineViewRange();
+    const size = view.end - view.start;
+    if (event.shiftKey) {
+      const rect = viewport.getBoundingClientRect();
+      const anchorRatio = Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height));
+      const anchor = view.start + size * anchorRatio;
+      const nextSize = size * (delta > 0 ? 1.25 : 0.8);
+      const start = anchor - anchorRatio * nextSize;
+      setTimelineView(start, start + nextSize);
+    } else {
+      const step = Math.max(15, Math.round(size * 0.1)) * (delta > 0 ? 1 : -1);
+      setTimelineView(view.start + step, view.end + step);
+    }
+    render();
+  }, { passive: false });
+
+  if (!scrubber) return;
+  scrubber.addEventListener('dblclick', () => {
+    state.timelineView = { start: 0, end: 24 * 60 };
+    render();
+  });
+  scrubber.addEventListener('pointerdown', (event) => {
+    const rect = scrubber.getBoundingClientRect();
+    const view = timelineViewRange();
+    const size = view.end - view.start;
+    if (!event.target.closest('[data-scrubber-thumb]')) {
+      const ratio = Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height));
+      const center = ratio * 24 * 60;
+      setTimelineView(center - size / 2, center + size / 2);
+      render();
+      return;
+    }
+    event.preventDefault();
+    const startY = event.clientY;
+    const startMinute = view.start;
+    // Drag survives re-renders because geometry is cached here and the
+    // move/up listeners live on document, not on the replaced thumb.
+    const onMove = (moveEvent) => {
+      const deltaMinutes = ((moveEvent.clientY - startY) / rect.height) * 24 * 60;
+      setTimelineView(startMinute + deltaMinutes, startMinute + deltaMinutes + size);
+      render();
+    };
+    const onUp = () => {
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+    };
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+  });
 }
 
 function bindTimeInputEvents() {
