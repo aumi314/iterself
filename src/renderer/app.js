@@ -67,7 +67,7 @@ const ZH = {
   'Status': '状态', 'Start': '开始', 'End': '结束', 'Daily task': '日任务', 'Title': '名称', 'Date': '日期',
   'Duration': '持续时间', 'Tags': '标签', 'Bound task': '绑定任务', 'Bound time record': '绑定任务时间记录',
   'Event category': '事件分类', 'Task': '任务', 'Name': '名称', 'Note': '备注', 'Quick insight': '心得内容',
-  'Time': '时间',
+  'Time': '时间', 'Now': '现在', 'Hour': '时', 'Minute': '分',
   'Parent': '上级', 'Type': '类型', 'Est. total minutes': '预计总分钟',
   'Counts as focus?': '计入专注时间？', 'Color': '颜色', 'Content': '内容', 'Objective': '目标',
   'Description': '说明', 'Target': '目标值', 'Current': '当前值', 'Unit': '单位',
@@ -207,20 +207,30 @@ function nowTime() {
   return new Date().toTimeString().slice(0, 5);
 }
 
-function timeInput(name, value, required = true) {
+function timeInput(name, value, required = true, role = null) {
   const hours = Array.from({ length: 24 }, (_, index) => String(index).padStart(2, '0'));
-  const minutes = Array.from({ length: 60 }, (_, index) => String(index).padStart(2, '0'));
-  const wheel = (part, values) => `
-    <div class="time-wheel" data-time-part="${part}" tabindex="0">
-      ${values.map((item) => `<button type="button" class="time-wheel-item" data-time-value="${item}">${item}</button>`).join('')}
+  const minutes = Array.from({ length: 12 }, (_, index) => String(index * 5).padStart(2, '0'));
+  const column = (part, values, label) => `
+    <div class="time-col-wrap">
+      <div class="time-col-label">${t(label)}</div>
+      <div class="time-col" data-time-part="${part}">
+        ${values.map((item) => `<button type="button" class="time-col-item" data-time-value="${item}">${item}</button>`).join('')}
+      </div>
     </div>
   `;
+  const offsets = role === 'end' ? [15, 30, 60, 90] : [];
   return `
     <div class="time-input-wrap" data-time-picker>
-      <input name="${name}" type="text" inputmode="numeric" class="time-input" data-time-input value="${escapeHtml(value)}" placeholder="HH:MM" pattern="^([01]?\\d|2[0-3]):[0-5]\\d$" ${required ? 'required' : ''} />
+      <input name="${name}" type="text" inputmode="numeric" autocomplete="off" class="time-input" data-time-input value="${escapeHtml(value)}" placeholder="HH:MM" pattern="^([01]?\\d|2[0-3]):[0-5]\\d$" ${required ? 'required' : ''} />
       <div class="time-picker" aria-label="Time picker">
-        ${wheel('hour', hours)}
-        ${wheel('minute', minutes)}
+        <div class="time-quick">
+          <button type="button" class="time-quick-chip" data-time-set="now">${t('Now')}</button>
+          ${offsets.map((step) => `<button type="button" class="time-quick-chip" data-time-offset="${step}">+${step}m</button>`).join('')}
+        </div>
+        <div class="time-columns">
+          ${column('hour', hours, 'Hour')}
+          ${column('minute', minutes, 'Minute')}
+        </div>
       </div>
     </div>
   `;
@@ -269,10 +279,27 @@ function timeToMinutes(time) {
 
 function normalizeTimeValue(value) {
   const text = String(value || '').trim();
-  const match = text.match(/^(\d{1,2})(?::?(\d{1,2}))?$/);
-  if (!match) return null;
-  const hours = Number(match[1]);
-  const minutes = Number(match[2] || 0);
+  let hours;
+  let minutes;
+  const withColon = text.match(/^(\d{1,2}):(\d{1,2})$/);
+  if (withColon) {
+    hours = Number(withColon[1]);
+    minutes = Number(withColon[2]);
+  } else if (/^\d{1,4}$/.test(text)) {
+    // Compact typing: 9 → 09:00, 930 → 09:30, 2130 → 21:30
+    if (text.length <= 2) {
+      hours = Number(text);
+      minutes = 0;
+    } else if (text.length === 3) {
+      hours = Number(text.slice(0, 1));
+      minutes = Number(text.slice(1));
+    } else {
+      hours = Number(text.slice(0, 2));
+      minutes = Number(text.slice(2));
+    }
+  } else {
+    return null;
+  }
   if (hours > 23 || minutes > 59) return null;
   return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
 }
@@ -294,52 +321,25 @@ function setTimeInputPart(input, part, value) {
   const parts = timeParts(input.value);
   parts[part] = value;
   input.value = `${parts.hour}:${parts.minute}`;
-  input.dispatchEvent(new Event('input', { bubbles: true }));
-  syncTimePicker(input);
+  syncTimePicker(input, { scroll: false });
 }
 
-function scrollTimeWheelToValue(wheel, value) {
-  const item = wheel.querySelector(`[data-time-value="${value}"]`);
-  if (!item) return;
-  const top = item.offsetTop - (wheel.clientHeight - item.offsetHeight) / 2;
-  wheel.scrollTo({ top, behavior: 'auto' });
-}
-
-function markTimeWheelValue(wheel, value) {
-  wheel.querySelectorAll('.time-wheel-item').forEach((item) => {
-    item.classList.toggle('active', item.dataset.timeValue === value);
-  });
-}
-
-function centeredTimeWheelValue(wheel) {
-  const center = wheel.scrollTop + wheel.clientHeight / 2;
-  let best = null;
-  let bestDistance = Infinity;
-  wheel.querySelectorAll('.time-wheel-item').forEach((item) => {
-    const itemCenter = item.offsetTop + item.offsetHeight / 2;
-    const distance = Math.abs(center - itemCenter);
-    if (distance < bestDistance) {
-      best = item.dataset.timeValue;
-      bestDistance = distance;
-    }
-  });
-  return best;
-}
-
-function syncTimePicker(input) {
+function syncTimePicker(input, { scroll = true } = {}) {
   const wrap = input.closest('[data-time-picker]');
   if (!wrap) return;
   const parts = timeParts(input.value);
-  const hourWheel = wrap.querySelector('[data-time-part="hour"]');
-  const minuteWheel = wrap.querySelector('[data-time-part="minute"]');
-  if (hourWheel) {
-    markTimeWheelValue(hourWheel, parts.hour);
-    scrollTimeWheelToValue(hourWheel, parts.hour);
-  }
-  if (minuteWheel) {
-    markTimeWheelValue(minuteWheel, parts.minute);
-    scrollTimeWheelToValue(minuteWheel, parts.minute);
-  }
+  wrap.querySelectorAll('[data-time-part]').forEach((column) => {
+    const value = column.dataset.timePart === 'hour' ? parts.hour : parts.minute;
+    let active = null;
+    column.querySelectorAll('.time-col-item').forEach((item) => {
+      const isActive = item.dataset.timeValue === value;
+      item.classList.toggle('active', isActive);
+      if (isActive) active = item;
+    });
+    if (scroll && active) {
+      column.scrollTop = active.offsetTop - (column.clientHeight - active.offsetHeight) / 2;
+    }
+  });
 }
 
 function normalizeTimeFields(values, fields) {
@@ -1467,8 +1467,8 @@ function scheduleForm(date, block = null) {
   return `
     <form data-form="schedule" data-mode="${mode}" data-id="${escapeHtml(block?.id || '')}" class="form-grid four">
       <input type="hidden" name="date" value="${escapeHtml(block?.date || date)}" />
-      <label>Start${timeInput('start', block?.start || '09:00')}</label>
-      <label>End${timeInput('end', block?.end || '10:00')}</label>
+      <label>Start${timeInput('start', block?.start || '09:00', true, 'start')}</label>
+      <label>End${timeInput('end', block?.end || '10:00', true, 'end')}</label>
       <label class="span2">Bound task<select name="taskId">${optionList(taskOptions(), block?.taskId || '')}</select></label>
       <label class="span4">Note<input name="note" value="${escapeHtml(block?.note || '')}" placeholder="Optional note" /></label>
       <div class="span4"><button type="submit">${block ? '保存日计划' : 'Add block'}</button></div>
@@ -1487,8 +1487,8 @@ function timeEntryForm(date, entry = null) {
     </div>`}
     <form data-form="time-entry" data-mode="${mode}" data-id="${escapeHtml(entry?.id || '')}" class="form-grid four">
       <input type="hidden" name="date" value="${escapeHtml(entry?.date || date)}" />
-      <label>Start${timeInput('start', timerStart)}</label>
-      <label>End${timeInput('end', entry?.end || nowTime())}</label>
+      <label>Start${timeInput('start', timerStart, true, 'start')}</label>
+      <label>End${timeInput('end', entry?.end || nowTime(), true, 'end')}</label>
       <label>Name<input name="title" value="${escapeHtml(entry?.title || '')}" placeholder="Optional free title" /></label>
       <label>Bound task<select name="taskId">${optionList(taskOptions(), entry?.taskId || '')}</select></label>
       <label class="span4">Note<input name="note" value="${escapeHtml(entry?.note || '')}" placeholder="What objectively happened?" /></label>
@@ -2015,21 +2015,40 @@ function bindTimeInputEvents() {
       wrap?.classList.add('open');
       syncTimePicker(input);
     });
+    input.addEventListener('click', () => {
+      if (wrap && !wrap.classList.contains('open')) {
+        wrap.classList.add('open');
+        syncTimePicker(input);
+      }
+    });
+    // Typing is never interfered with: the panel only highlights (no
+    // scrolling, and nothing writes the input back except explicit picks).
     input.addEventListener('input', () => {
-      if (normalizeTimeValue(input.value)) syncTimePicker(input);
+      if (normalizeTimeValue(input.value)) syncTimePicker(input, { scroll: false });
     });
     input.addEventListener('wheel', (event) => {
+      if (document.activeElement !== input) return; // don't hijack page scroll
       event.preventDefault();
       const step = event.shiftKey ? 60 : 5;
       input.value = addMinutesToTime(input.value, event.deltaY < 0 ? step : -step);
-      input.dispatchEvent(new Event('input', { bubbles: true }));
+      syncTimePicker(input);
     }, { passive: false });
     input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        const normalized = normalizeTimeValue(input.value);
+        if (normalized) input.value = normalized;
+        wrap?.classList.remove('open');
+        return;
+      }
+      if (event.key === 'Escape') {
+        wrap?.classList.remove('open');
+        return;
+      }
       if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
       event.preventDefault();
       const step = event.shiftKey ? 60 : 5;
       input.value = addMinutesToTime(input.value, event.key === 'ArrowUp' ? step : -step);
-      input.dispatchEvent(new Event('input', { bubbles: true }));
+      syncTimePicker(input);
     });
     input.addEventListener('blur', () => {
       const normalized = normalizeTimeValue(input.value);
@@ -2038,23 +2057,28 @@ function bindTimeInputEvents() {
   });
   $$('[data-time-picker]').forEach((wrap) => {
     const input = wrap.querySelector('[data-time-input]');
-    wrap.querySelectorAll('.time-wheel-item').forEach((item) => {
+    wrap.querySelectorAll('.time-col-item').forEach((item) => {
       item.addEventListener('mousedown', (event) => event.preventDefault());
       item.addEventListener('click', () => {
-        const wheel = item.closest('.time-wheel');
-        if (!input || !wheel) return;
-        setTimeInputPart(input, wheel.dataset.timePart, item.dataset.timeValue);
-        input.focus();
+        const column = item.closest('[data-time-part]');
+        if (!input || !column) return;
+        setTimeInputPart(input, column.dataset.timePart, item.dataset.timeValue);
+        if (column.dataset.timePart === 'minute') wrap.classList.remove('open');
       });
     });
-    wrap.querySelectorAll('.time-wheel').forEach((wheel) => {
-      wheel.addEventListener('scroll', () => {
-        clearTimeout(wheel.scrollTimer);
-        wheel.scrollTimer = setTimeout(() => {
-          if (!input || !wrap.classList.contains('open')) return;
-          const value = centeredTimeWheelValue(wheel);
-          if (value) setTimeInputPart(input, wheel.dataset.timePart, value);
-        }, 80);
+    wrap.querySelectorAll('.time-quick-chip').forEach((chip) => {
+      chip.addEventListener('mousedown', (event) => event.preventDefault());
+      chip.addEventListener('click', () => {
+        if (!input) return;
+        if (chip.dataset.timeOffset) {
+          const startInput = wrap.closest('form')?.querySelector('[name="start"]');
+          const base = normalizeTimeValue(startInput?.value) || nowTime();
+          input.value = addMinutesToTime(base, Number(chip.dataset.timeOffset));
+        } else {
+          input.value = nowTime();
+        }
+        syncTimePicker(input);
+        wrap.classList.remove('open');
       });
     });
     wrap.addEventListener('focusout', () => {
