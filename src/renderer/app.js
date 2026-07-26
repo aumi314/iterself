@@ -1067,7 +1067,10 @@ function renderSidebarTimeline() {
       <div class="timeline-scrubber" data-timeline-scrubber title="${en ? 'Drag to move the window · double-click to reset' : '拖动移动窗口 · 双击复位全天'}">
         ${schedules.map((block) => scrubberMark(block, 'planned')).join('')}
         ${entries.map((entry) => scrubberMark(entry, 'actual')).join('')}
-        <div class="scrubber-thumb" data-scrubber-thumb style="top:${(range.start / (24 * 60)) * 100}%;height:${(size / (24 * 60)) * 100}%;"></div>
+        <div class="scrubber-thumb" data-scrubber-thumb style="top:${(range.start / (24 * 60)) * 100}%;height:${(size / (24 * 60)) * 100}%;">
+          <div class="scrubber-handle top" data-scrubber-handle="start"></div>
+          <div class="scrubber-handle bottom" data-scrubber-handle="end"></div>
+        </div>
       </div>
     </div>
   `;
@@ -2170,7 +2173,8 @@ function bindTimelineViewEvents() {
     const rect = scrubber.getBoundingClientRect();
     const view = timelineViewRange();
     const size = view.end - view.start;
-    if (!event.target.closest('[data-scrubber-thumb]')) {
+    const handle = event.target.closest('[data-scrubber-handle]');
+    if (!handle && !event.target.closest('[data-scrubber-thumb]')) {
       const ratio = Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height));
       const center = ratio * 24 * 60;
       setTimelineView(center - size / 2, center + size / 2);
@@ -2179,12 +2183,21 @@ function bindTimelineViewEvents() {
     }
     event.preventDefault();
     const startY = event.clientY;
-    const startMinute = view.start;
+    const startView = { start: view.start, end: view.end };
+    const resizeEdge = handle ? handle.dataset.scrubberHandle : null;
     // Drag survives re-renders because geometry is cached here and the
     // move/up listeners live on document, not on the replaced thumb.
     const onMove = (moveEvent) => {
       const deltaMinutes = ((moveEvent.clientY - startY) / rect.height) * 24 * 60;
-      setTimelineView(startMinute + deltaMinutes, startMinute + deltaMinutes + size);
+      if (resizeEdge === 'start') {
+        const nextStart = Math.min(startView.end - 60, Math.max(0, startView.start + deltaMinutes));
+        setTimelineView(nextStart, startView.end);
+      } else if (resizeEdge === 'end') {
+        const nextEnd = Math.max(startView.start + 60, Math.min(24 * 60, startView.end + deltaMinutes));
+        setTimelineView(startView.start, nextEnd);
+      } else {
+        setTimelineView(startView.start + deltaMinutes, startView.start + deltaMinutes + size);
+      }
       render();
     };
     const onUp = () => {

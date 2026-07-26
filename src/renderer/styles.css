@@ -548,11 +548,39 @@ label {
   position: absolute;
   left: 1px;
   right: 1px;
-  min-height: 10px;
+  min-height: 14px;
   border: 1px solid var(--accent);
   border-radius: 6px;
   background: rgba(127, 127, 127, 0.25);
   cursor: grab;
+}
+
+.scrubber-handle {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 8px;
+  cursor: ns-resize;
+}
+
+.scrubber-handle.top {
+  top: -3px;
+}
+
+.scrubber-handle.bottom {
+  bottom: -3px;
+}
+
+.scrubber-thumb:hover .scrubber-handle::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  top: 50%;
+  height: 2px;
+  transform: translateY(-50%);
+  border-radius: 1px;
+  background: var(--accent);
 }
 
 .sidebar-timeline-body {
