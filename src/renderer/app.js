@@ -1014,7 +1014,9 @@ function renderSidebarTimeline() {
   const schedules = collection('scheduleBlocks').filter((block) => block.date === date).sort((a, b) => `${a.start}`.localeCompare(`${b.start}`));
   const entries = collection('timeEntries').filter((entry) => entry.date === date).sort((a, b) => `${a.start}`.localeCompare(`${b.start}`));
   const summary = summarizeDate(date);
-  const range = timelineRange([...schedules, ...entries]);
+  // The panel's job is the shape of the whole day: a fixed 00:00–24:00
+  // axis filling the sidebar, not a window fitted to the data.
+  const range = { start: 0, end: 24 * 60 };
   const heading = `
     <div class="markdown-workspace-innerbar">
       <div class="markdown-workspace-title">
@@ -1024,12 +1026,9 @@ function renderSidebarTimeline() {
       <div class="markdown-workspace-actions"><span class="badge focus">${en ? 'Focus' : '专注'} ${escapeHtml(formatMinutes(summary.focusMinutes))}</span></div>
     </div>
   `;
-  if (!range) {
-    return `${heading}<div class="empty markdown-workspace-empty">${en ? 'No schedule blocks or time records on this day.' : '这一天还没有日计划或时间记录。'}</div>`;
-  }
-  const hourMarks = timelineHourMarks(range);
+  const hourMarks = timelineHourMarks(range, 120);
   const nowMinutes = timeToMinutes(nowTime());
-  const nowLine = date === today && nowMinutes !== null && nowMinutes >= range.start && nowMinutes <= range.end
+  const nowLine = date === today && nowMinutes !== null
     ? `<div class="timeline-now-line" style="top:${timelinePercent(nowMinutes, range)}%;"><span>${escapeHtml(nowTime())}</span></div>`
     : '';
   return `
@@ -1040,9 +1039,9 @@ function renderSidebarTimeline() {
         <button class="small secondary" data-action="open-schedule-modal">+ ${t('Schedule blocks')}</button>
         <button class="small secondary" data-action="open-time-entry-modal">+ ${t('Time records')}</button>
       </div>
-      <div class="day-timeline-body sidebar-timeline-body" style="height:${Math.round((range.end - range.start) * 0.85)}px;">
+      <div class="day-timeline-body sidebar-timeline-body">
         <div class="timeline-axis">
-          ${hourMarks.map((minute) => `<div class="timeline-hour-label" style="top:${timelinePercent(minute, range)}%;">${String(Math.floor((minute % (24 * 60)) / 60)).padStart(2, '0')}:00</div>`).join('')}
+          ${hourMarks.map((minute) => `<div class="timeline-hour-label" style="top:${timelinePercent(minute, range)}%;">${minute === 24 * 60 ? '24:00' : `${String(Math.floor(minute / 60)).padStart(2, '0')}:00`}</div>`).join('')}
         </div>
         <div class="timeline-track planned-track">
           ${hourMarks.map((minute) => `<div class="timeline-hour-line" style="top:${timelinePercent(minute, range)}%;"></div>`).join('')}
@@ -1487,26 +1486,10 @@ function scheduleColumnHead(label, action) {
   `;
 }
 
-function timelineRange(items) {
-  const timedItems = items
-    .map((item) => {
-      const start = timeToMinutes(item.start);
-      const duration = minutesBetween(item.start, item.end);
-      return start === null || duration <= 0 ? null : { start, end: start + duration };
-    })
-    .filter(Boolean);
-  if (!timedItems.length) return null;
-  const earliest = Math.min(...timedItems.map((item) => item.start));
-  const latest = Math.max(...timedItems.map((item) => item.end));
-  const start = Math.max(0, Math.floor(earliest / 60) * 60);
-  const end = Math.min(24 * 60, Math.ceil(latest / 60) * 60);
-  return { start, end: Math.max(end, start + 60) };
-}
-
-function timelineHourMarks(range) {
-  const first = Math.ceil(range.start / 60) * 60;
+function timelineHourMarks(range, stepMinutes = 60) {
+  const first = Math.ceil(range.start / stepMinutes) * stepMinutes;
   const marks = [];
-  for (let minute = first; minute <= range.end; minute += 60) {
+  for (let minute = first; minute <= range.end; minute += stepMinutes) {
     marks.push(minute);
   }
   return marks;
