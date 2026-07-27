@@ -16,7 +16,7 @@ Five pillars split across two realms. The ideal realm defines what winning means
 **Ideal realm (理想层)**
 
 1. **md 文档** — one `documents` collection. 愿景 (open pool) is the prose ideal: who I want to become. 规划/复盘 documents (per day/week/month) are the rhythm layer where reconciliation gets written.
-2. **OKR 系统** — the quantified ideal: a measurable translation of the vision, sibling of the documents, not an execution object. O = long-term direction (life areas such as 身心健康/学业有成/副业搞钱); KR = what counts as winning. KR progress is derived through the mounting line, never hand-maintained.
+2. **OKR 系统** — 类似于文档: a document-like, quantified decomposition of the vision, sibling of the md documents, not an execution object. O = long-term direction (life areas such as 身心健康/学业有成/副业搞钱); KR = what counts as winning. It is written and revised the way a document is — read when planning, reconciled against reality when reviewing — and maintained by hand.
 
 **Execution realm (落地层)**
 
@@ -24,17 +24,11 @@ Five pillars split across two realms. The ideal realm defines what winning means
 4. **三维日记录** — 日计划 (schedule blocks), 时间记录 (time entries), 心得 (insights): the daily execution ledger.
 5. **事件库** — the leaves of the eventCategories tree. Time record names are picked from it; it is the naming vocabulary for time plus the focus rules, not a goal system.
 
-**The mounting line (挂载线)** — the only bridge between realms. Any task node (project or leaf) may mount to a KR or an O. Completion and recorded time roll up the task tree to the mount point and feed KR progress under one of three scoring rules:
-
-- 习惯型 (habit): count/streak of completions of mounted tasks (每天冥想)
-- 累计型 (cumulative): recorded quantity/time summed toward a target (背完5000单词)
-- 结果型 (outcome): manually evidenced (GPA≥3.5, 星数破百); mounted tasks are the 打法, whose invested time is tracked for reconciliation
-
-Guards against decay: a KR with no mounted task displays as 未落地 (a stalled ideal — the OKR analogue of a stalled project); KR detail offers one-click twin-task generation so mounting costs one gesture.
+**How the realms meet.** Nothing automatic is canonized. The two realms meet in 复盘: the human reads both ledgers and reconciles them. A machine-assisted bridge — mounting task nodes to KRs with habit/cumulative/outcome scoring rules and derived KR progress — was explored in design discussion but is explicitly not ratified (2026-07-27); it stays on file as an open proposal, to be revisited only if hand reconciliation proves too costly in real use.
 
 **复盘 = reconciliation.** The execution ledger answers "did I do what I said"; the ideal ledger answers "did the numbers move". The gap between the two ledgers — effort without results, or results without executed plans — is the core self-honesty signal the app exists to surface.
 
-Implementation status: pillars 1 and 4 are live; pillar 3 has tree + bindings live with project-folder rendering pending; pillar 5 has the category tree live with the name picker pending; pillar 2 has OKR objects live with scoring types and the mounting line pending. Agreed build order: 事件库 name picker → review template variable injection → OKR 执行化 (mounting line + scoring + project folders).
+Implementation status: pillars 1, 2, and 4 are live (OKR as a hand-maintained scoreboard); pillar 3 has tree + bindings live with project-folder rendering pending; pillar 5 has the category tree live with the name picker pending. Agreed build order: 事件库 name picker → review template variable injection → project-folder rendering for the task library.
 
 ## MVP stack
 
