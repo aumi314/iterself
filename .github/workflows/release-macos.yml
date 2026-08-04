@@ -41,11 +41,14 @@ jobs:
       - name: Test data layer
         run: npm test
 
+      - name: Build renderer assets
+        run: npm run build:renderer
+
       - name: Run smoke checks
         run: npm run smoke
 
       - name: Build macOS package
-        run: npm run build:renderer && npx electron-builder --mac --${{ matrix.arch }} --publish never
+        run: npx electron-builder --mac --${{ matrix.arch }} --publish never
 
       - name: Verify packaged app
         run: npm run verify
