@@ -1,5 +1,11 @@
 # IterSelf — Release Notes
 
+## macOS 下载（v0.3.15）
+
+- GitHub Release 同时提供 Intel（x64）与 Apple Silicon（arm64）的 DMG 和 ZIP。
+- DMG 用于常规安装；ZIP 用于直接解压或排查 DMG 安装问题。
+- 当前产物未使用 Apple Developer ID 签名与公证，首次打开需要在系统安全设置中手动允许。
+
 ## v0.3.15（2026-07-26）
 
 - 术语定稿："计划"只指当日具体日程（日计划时间块），文档一律按周期叫"规划/复盘"——日文档从"计划文档/复盘文档"改名"日规划/日复盘"，与周规划/月规划对齐

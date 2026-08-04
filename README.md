@@ -2,7 +2,7 @@
 
 Local-first personal iteration desktop app for planning, recording, reviewing, and exporting life/work cycles.
 
-本地优先的 Windows 桌面应用：统筹规划 · 客观记录 · 复盘迭代。
+本地优先的 Windows / macOS 桌面应用：统筹规划 · 客观记录 · 复盘迭代。
 
 ## Features
 
@@ -28,6 +28,7 @@ npm install
 npm start              # Launch dev version
 npm test               # Run automated tests
 npm run build          # Build NSIS installer + portable exe
+npm run build:mac      # Build macOS DMG + ZIP (run on macOS)
 npm run verify         # Verify build artifacts
 ```
 

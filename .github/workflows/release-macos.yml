@@ -1,0 +1,77 @@
+name: Release macOS
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing GitHub Release tag to receive the macOS assets
+        required: true
+        default: v0.3.15
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build macOS ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: macos-15-intel
+          - arch: arm64
+            runner: macos-15
+    runs-on: ${{ matrix.runner }}
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test data layer
+        run: npm test
+
+      - name: Run smoke checks
+        run: npm run smoke
+
+      - name: Build macOS package
+        run: npm run build:renderer && npx electron-builder --mac --${{ matrix.arch }} --publish never
+
+      - name: Verify packaged app
+        run: npm run verify
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}
+          path: |
+            dist/IterSelf-*-mac-${{ matrix.arch }}.dmg
+            dist/IterSelf-*-mac-${{ matrix.arch }}.zip
+          if-no-files-found: error
+
+  publish:
+    name: Attach macOS assets to Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Upload assets to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          REPOSITORY: ${{ github.repository }}
+        run: gh release upload "$TAG" artifacts/**/* --repo "$REPOSITORY" --clobber

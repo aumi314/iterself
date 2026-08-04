@@ -9,7 +9,20 @@ const fs = require('node:fs');
 const projectRoot = path.join(__dirname, '..');
 const asar = require(path.join(projectRoot, 'node_modules', '@electron', 'asar'));
 
-// Pick the newest dist* directory containing win-unpacked when no arg given.
+function findArchive(distDir) {
+  const locations = [
+    path.join('win-unpacked', 'resources', 'app.asar'),
+    path.join('mac', 'IterSelf.app', 'Contents', 'Resources', 'app.asar'),
+    path.join('mac-x64', 'IterSelf.app', 'Contents', 'Resources', 'app.asar'),
+    path.join('mac-arm64', 'IterSelf.app', 'Contents', 'Resources', 'app.asar'),
+    path.join('mac-universal', 'IterSelf.app', 'Contents', 'Resources', 'app.asar'),
+  ];
+  return locations
+    .map((location) => path.join(distDir, location))
+    .find((archive) => fs.existsSync(archive));
+}
+
+// Pick the newest dist* directory containing a packaged app when no arg is given.
 function resolveDistDir() {
   const arg = process.argv[2];
   if (arg) return path.join(projectRoot, arg);
@@ -17,18 +30,21 @@ function resolveDistDir() {
     .readdirSync(projectRoot)
     .filter((name) => name === 'dist' || name.startsWith('dist-'))
     .map((name) => path.join(projectRoot, name))
-    .filter((dir) => fs.existsSync(path.join(dir, 'win-unpacked', 'resources', 'app.asar')))
-    .sort((a, b) => fs.statSync(path.join(b, 'win-unpacked', 'resources', 'app.asar')).mtimeMs
-      - fs.statSync(path.join(a, 'win-unpacked', 'resources', 'app.asar')).mtimeMs);
+    .filter((dir) => findArchive(dir))
+    .sort((a, b) => fs.statSync(findArchive(b)).mtimeMs - fs.statSync(findArchive(a)).mtimeMs);
   if (!candidates.length) {
-    console.error('No dist*/win-unpacked/resources/app.asar found. Run npm run build first.');
+    console.error('No packaged app.asar found under dist*. Run a platform build first.');
     process.exit(1);
   }
   return candidates[0];
 }
 
 const distDir = resolveDistDir();
-const archive = path.join(distDir, 'win-unpacked', 'resources', 'app.asar');
+const archive = findArchive(distDir);
+if (!archive) {
+  console.error(`No packaged app.asar found under ${distDir}.`);
+  process.exit(1);
+}
 const files = asar.listPackage(archive, {});
 
 const required = [
