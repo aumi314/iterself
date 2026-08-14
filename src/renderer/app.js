@@ -1127,6 +1127,33 @@ function renderSidebarTimeline() {
   `;
 }
 
+// The now-line is computed at render time only; without a ticker it goes
+// stale until the next interaction. Update it in place instead of a full
+// re-render, which would disturb in-progress drags and the scroll position.
+function refreshTimelineNowLine() {
+  const viewport = document.querySelector('[data-timeline-viewport]');
+  if (!viewport) return;
+  const range = timelineViewRange();
+  const nowMinutes = timeToMinutes(nowTime());
+  const showNow = activeDate() === calendarDateIso(new Date())
+    && nowMinutes !== null
+    && nowMinutes >= range.start
+    && nowMinutes <= range.end;
+  let line = viewport.querySelector('.timeline-now-line');
+  if (!showNow) {
+    if (line) line.remove();
+    return;
+  }
+  if (!line) {
+    line = document.createElement('div');
+    line.className = 'timeline-now-line';
+    line.innerHTML = '<span></span>';
+    viewport.appendChild(line);
+  }
+  line.style.top = `${timelinePercent(nowMinutes, range)}%`;
+  line.querySelector('span').textContent = nowTime();
+}
+
 function renderMarkdownWorkspace() {
   if (state.sidebarPanel === 'timeline') {
     return `
@@ -3337,6 +3364,7 @@ async function init() {
   }
 
   render();
+  setInterval(refreshTimelineNowLine, 30 * 1000);
 
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
     if (state.data.settings?.theme === 'system') applySettings();
