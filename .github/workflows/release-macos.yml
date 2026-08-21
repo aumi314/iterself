@@ -6,7 +6,6 @@ on:
       tag:
         description: Existing GitHub Release tag to receive the macOS assets
         required: true
-        default: v0.3.15
 
 permissions:
   contents: write
@@ -28,6 +27,8 @@ jobs:
     steps:
       - name: Check out release source
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v4

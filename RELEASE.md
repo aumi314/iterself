@@ -1,5 +1,11 @@
 # IterSelf — Release Notes
 
+## v0.3.17
+
+- 升级 Electron 与构建依赖，清除已知的 npm 安全告警
+- 新增 push / pull request 自动测试与 Windows 打包校验
+- macOS 发布工作流改为检出指定 tag，避免 Release 与实际源码版本不一致
+
 ## macOS 构建支持（v0.3.15）
 
 - 发布工作流会为 Intel（x64）与 Apple Silicon（arm64）生成 DMG 和 ZIP，并挂到指定 GitHub Release。
@@ -195,6 +201,8 @@
 - 未做代码签名证书，首次运行可能触发 SmartScreen 提示
 
 ## 构建方式
+
+需要 Node.js 22.12 或更高版本。
 
 ```bash
 npm install
