@@ -23,6 +23,8 @@ Local-first personal iteration desktop app for planning, recording, reviewing, a
 
 ## Development
 
+Requires Node.js 22.12 or newer.
+
 ```bash
 npm install
 npm start              # Launch dev version
