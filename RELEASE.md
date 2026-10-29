@@ -1,10 +1,12 @@
 # IterSelf — Release Notes
 
-## v0.3.17
+## v0.3.17（未发布）
 
 - 升级 Electron 与构建依赖，清除已知的 npm 安全告警
 - 新增 push / pull request 自动测试与 Windows 打包校验
 - macOS 发布工作流改为检出指定 tag，避免 Release 与实际源码版本不一致
+
+仍在 Draft PR #1，未合并进 main、未打 tag。现役公开版本是 v0.3.16。
 
 ## macOS 构建支持（v0.3.15）
 
@@ -153,13 +155,18 @@
 
 ## 产物
 
+正式下载入口是 GitHub Releases 页（每个版本一套产物），本地构建产物在 `dist/`：
+
 | 文件 | 用途 |
 |---|---|
-| `dist/IterSelf-Setup-0.1.0-x64.exe` | NSIS 安装包（可选安装目录，创建桌面/开始菜单快捷方式） |
-| `dist/IterSelf-Portable-0.1.0-x64.exe` | 便携版单文件，免安装直接运行 |
-| `dist/win-unpacked/` | 未打包目录版（开发验证用） |
+| `IterSelf-Setup-<version>-x64.exe` | NSIS 安装包（可选安装目录，创建桌面/开始菜单快捷方式） |
+| `IterSelf-Portable-<version>-x64.exe` | 便携版单文件，免安装直接运行 |
+| `IterSelf-<version>-mac-{x64,arm64}.dmg` / `.zip` | macOS Intel / Apple Silicon |
+| `dist/win-unpacked/` | 未打包目录版（开发验证用，不发布） |
 
-## 功能清单
+## 功能清单（v0.1.0 首发快照）
+
+以下是首发版本的功能快照，仅作历史留档。现役功能看 README.md 与 DESIGN.md。
 
 ### 周期系统
 - **Schedule**：顶部两行时间轴，第一行切换周，第二行切换 7 天；选周管理周任务，并按天查看日任务、时间记录、心得；选日管理日任务，通过 + 弹窗新增日计划/时间记录/心得，并在排列视图和等比例时间轴视图之间切换
@@ -199,6 +206,8 @@
 - 无图表可视化（当前用表格呈现周汇总）
 - 单实例数据文件，无多设备同步（设计如此，local-first）
 - 未做代码签名证书，首次运行可能触发 SmartScreen 提示
+- 无自动更新：Release 不上传 `latest.yml`，也没有 electron-updater 依赖，新版本需手动下载安装
+- macOS 产物未做 Developer ID 签名与公证，首次打开要在系统安全设置里手动允许
 
 ## 构建方式
 

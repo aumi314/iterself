@@ -34,6 +34,12 @@ npm run build:mac      # Build macOS DMG + ZIP (run on macOS)
 npm run verify         # Verify build artifacts
 ```
 
+## Releases
+
+Prebuilt installers are published on the [Releases](https://github.com/aumi314/iterself/releases) page: an NSIS `Setup` and a single-file `Portable` build for Windows x64, plus `DMG` and `ZIP` for macOS x64 and arm64. There is no auto-update channel, so upgrading is a manual download. User data stays in the OS user-data directory (`%APPDATA%\iterself` on Windows).
+
+Release procedure and known gotchas: [docs/release-runbook.md](docs/release-runbook.md).
+
 ## Product Philosophy
 
 - Local-first: user owns the data

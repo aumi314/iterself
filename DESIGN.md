@@ -1,6 +1,6 @@
 # IterSelf MVP Design
 
-IterSelf is a local-first Windows desktop app for personal iteration: plan, record, review, and export structured life/work data without forcing a specific self-improvement doctrine.
+IterSelf is a local-first Windows / macOS desktop app for personal iteration: plan, record, review, and export structured life/work data without forcing a specific self-improvement doctrine.
 
 ## Product stance
 
@@ -117,6 +117,7 @@ MVP is publishable when:
 
 - App launches locally on Windows via `npm start`.
 - App builds an unpacked Windows Electron app.
+- macOS ships as DMG + ZIP for x64 and arm64 (release procedure: `docs/release-runbook.md`).
 - User can create categories, tasks, OKRs, weekly bindings, daily bindings, schedule blocks, time entries, insights, and documents.
 - Current day/week summaries calculate focus time using category rules.
 - Exports produce JSON, Markdown, and CSV.
